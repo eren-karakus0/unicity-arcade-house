@@ -1,9 +1,15 @@
 import { useCallback, useRef, useState } from 'react';
-import { ConnectClient, SPHERE_NETWORKS } from '@unicitylabs/sphere-sdk/connect';
+import {
+  ConnectClient,
+  SPHERE_NETWORKS,
+  HOST_READY_TYPE,
+  HOST_READY_TIMEOUT,
+} from '@unicitylabs/sphere-sdk/connect';
 import { PostMessageTransport, ExtensionTransport } from '@unicitylabs/sphere-sdk/connect/browser';
 import type { ConnectTransport, PublicIdentity } from '@unicitylabs/sphere-sdk/connect';
 
 const WALLET_URL = 'https://sphere.unicity.network';
+const SESSION_KEY = 'sphere-connect-session';
 
 const DAPP = {
   name: 'Sphere Agent Bazaar',
@@ -22,6 +28,28 @@ function hasExtension(): boolean {
   }
 }
 
+/**
+ * Wait for the wallet popup to post HOST_READY before we send the handshake —
+ * otherwise the connect message races ahead of the wallet's listener and is
+ * dropped (popup opens but never shows the approval UI).
+ */
+function waitForHostReady(timeoutMs = HOST_READY_TIMEOUT): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', handler);
+      reject(new Error('Wallet did not become ready — make sure you are signed in to your Sphere wallet.'));
+    }, timeoutMs);
+    function handler(event: MessageEvent) {
+      if ((event.data as { type?: string })?.type === HOST_READY_TYPE) {
+        clearTimeout(timer);
+        window.removeEventListener('message', handler);
+        resolve();
+      }
+    }
+    window.addEventListener('message', handler);
+  });
+}
+
 export type WalletStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
 export interface WalletState {
@@ -37,6 +65,7 @@ export function useWallet(): WalletState {
   const [identity, setIdentity] = useState<PublicIdentity | null>(null);
   const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<ConnectClient | null>(null);
+  const transportRef = useRef<ConnectTransport | null>(null);
   const popupRef = useRef<Window | null>(null);
 
   const connect = useCallback(async () => {
@@ -44,6 +73,8 @@ export function useWallet(): WalletState {
     setError(null);
     try {
       let transport: ConnectTransport;
+      let isPopup = false;
+
       if (hasExtension()) {
         transport = ExtensionTransport.forClient();
       } else {
@@ -55,15 +86,24 @@ export function useWallet(): WalletState {
         if (!popup) throw new Error('Popup blocked — please allow popups for this site.');
         popupRef.current = popup;
         transport = PostMessageTransport.forClient({ target: popup, targetOrigin: WALLET_URL });
+        isPopup = true;
       }
+      transportRef.current = transport;
 
+      // The fix: let the popup announce it is listening before handshaking.
+      if (isPopup) await waitForHostReady();
+
+      const resumeSessionId = sessionStorage.getItem(SESSION_KEY) ?? undefined;
       const client = new ConnectClient({
         transport,
         dapp: DAPP,
         network: SPHERE_NETWORKS.testnet2,
+        ...(resumeSessionId ? { resumeSessionId } : {}),
       });
-      const result = await client.connect();
       clientRef.current = client;
+
+      const result = await client.connect();
+      sessionStorage.setItem(SESSION_KEY, result.sessionId);
       setIdentity(result.identity);
       setStatus('connected');
     } catch (e) {
@@ -78,12 +118,19 @@ export function useWallet(): WalletState {
     } catch {
       /* ignore */
     }
-    clientRef.current = null;
+    try {
+      transportRef.current?.destroy();
+    } catch {
+      /* ignore */
+    }
     try {
       popupRef.current?.close();
     } catch {
       /* ignore */
     }
+    sessionStorage.removeItem(SESSION_KEY);
+    clientRef.current = null;
+    transportRef.current = null;
     popupRef.current = null;
     setIdentity(null);
     setStatus('idle');
