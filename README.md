@@ -123,10 +123,14 @@ All config lives in `.env` (see `.env.example`). Notable values:
 
 - [x] **M1 — foundation:** monorepo, `SphereAgent` v2 wiring, identities, self-mint,
       end-to-end transfer verified on testnet2.
-- [ ] **M2 — economy:** provider service loop (GitHub + OSV.dev risk scoring),
-      market intents, payment-request settlement, AlphaScout autonomous hire loop.
-- [ ] **M3 — polish:** live dashboard, error handling, deploy, `sphere-apps` listing.
-- [ ] **M4 — stretch:** escrow-swap settlement, AstridOS runtime.
+- [x] **M2 — economy:** provider service loop (SSRF-guarded GitHub risk scoring),
+      market `service` intents, semantic discovery, DM job protocol, payment-request
+      settlement, and AlphaScout's autonomous hire loop with hard treasury caps.
+      **Verified live on testnet2:** AlphaScout discovers `@analyst-knkchn` on the
+      market, hires it for two repos, pays the bills itself, and receives the
+      reports — money moving between two agents with no human in the loop.
+- [ ] **M3 — polish:** live dashboard, deploy, `sphere-apps` listing, more risk signals (OSV.dev CVEs).
+- [ ] **M4 — stretch:** escrow-swap settlement, AstridOS runtime, Gemini summaries.
 
 ## License
 

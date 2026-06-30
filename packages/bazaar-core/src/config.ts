@@ -53,11 +53,11 @@ export function loadEnv(): BazaarEnv {
     oracleApiKey: clean(process.env.SPHERE_ORACLE_API_KEY) ?? PUBLIC_TESTNET2_KEY,
     walletApiUrl: clean(process.env.SPHERE_WALLET_API_URL) ?? DEFAULT_WALLET_API_URL,
     analyst: {
-      nametag: clean(process.env.ANALYST_NAMETAG) ?? 'analyst-eren',
+      nametag: clean(process.env.ANALYST_NAMETAG) ?? 'analyst-knkchn',
       mnemonic: clean(process.env.ANALYST_MNEMONIC),
     },
     alphascout: {
-      nametag: clean(process.env.ALPHASCOUT_NAMETAG) ?? 'alphascout-eren',
+      nametag: clean(process.env.ALPHASCOUT_NAMETAG) ?? 'alphascout-knkchn',
       mnemonic: clean(process.env.ALPHASCOUT_MNEMONIC),
     },
     gemini: {
