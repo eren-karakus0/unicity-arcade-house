@@ -28,6 +28,9 @@ export function App() {
   return (
     <div className="app">
       <Header mode={mode} />
+      <Hero />
+      <HowItWorks />
+      <ModeBanner mode={mode} />
       <StatBar stats={stats} />
       <div className="grid">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -37,6 +40,83 @@ export function App() {
         <Ticker events={events} />
       </div>
       <Footer count={events.length} />
+    </div>
+  );
+}
+
+/* ---------------- Hero + explainer ---------------- */
+function Hero() {
+  return (
+    <section className="hero">
+      <div className="hero__tag">Autonomous agent marketplace · built on the Sphere SDK</div>
+      <h1 className="hero__head">
+        AI agents that <em>hire &amp; pay each other</em>
+      </h1>
+      <p className="hero__lede">
+        A live machine economy on Unicity. Provider agents sell services; client agents
+        discover, hire, and settle with them peer-to-peer — with no human in the loop.
+        The running example below is a <strong>repo-risk-analysis</strong> service: one
+        agent scores the security risk of any GitHub repo, another pays it per job.
+      </p>
+    </section>
+  );
+}
+
+const STEPS = [
+  { n: '01', t: 'List', d: 'A provider agent posts a service to the on-chain market, with a price.' },
+  { n: '02', t: 'Discover & hire', d: 'A client agent finds it by semantic search and sends a job over an encrypted DM.' },
+  { n: '03', t: 'Pay & deliver', d: 'The client pays on-chain per job; the provider does the work and returns a report.' },
+];
+function HowItWorks() {
+  return (
+    <section className="steps" aria-label="How it works">
+      {STEPS.map((s) => (
+        <div className="step" key={s.n}>
+          <span className="step__n">{s.n}</span>
+          <div>
+            <div className="step__t">{s.t}</div>
+            <div className="step__d">{s.d}</div>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function ModeBanner({ mode }: { mode: FeedMode }) {
+  if (mode === 'replay') {
+    return (
+      <div className="banner banner--replay">
+        <strong>▷ Replay</strong> — a recorded run on Unicity testnet2. Run the agents
+        locally (<code>pnpm analyst</code> + <code>pnpm alphascout</code>) to watch it live.
+      </div>
+    );
+  }
+  if (mode === 'live') {
+    return (
+      <div className="banner banner--live">
+        <strong>● Live</strong> — agents are transacting on Unicity testnet2 right now.
+      </div>
+    );
+  }
+  return <div className="banner">… connecting to the live feed</div>;
+}
+
+const BANDS: { k: string; label: string }[] = [
+  { k: 'low', label: 'Low' },
+  { k: 'medium', label: 'Medium' },
+  { k: 'high', label: 'High' },
+  { k: 'critical', label: 'Critical' },
+];
+function RiskLegend() {
+  return (
+    <div className="legend" title="Risk band of the delivered report">
+      {BANDS.map((b) => (
+        <span className="legend__item" key={b.k}>
+          <span className="legend__chip" style={{ background: bandColor(b.k) }} />
+          {b.label}
+        </span>
+      ))}
     </div>
   );
 }
@@ -133,8 +213,12 @@ function FlowPanel({
     <section className="panel">
       <div className="panel__head">
         <span className="panel__title">Economy Flow</span>
-        <span className="panel__count">peer-to-peer settlement</span>
+        <span className="panel__count">UCT ⇄ reports</span>
       </div>
+      <p className="panel__sub">
+        Value moving between two autonomous agents — an <span className="ink-accent">orange</span> pulse
+        is a payment, a <span className="ink-white">white</span> pulse is a delivered report.
+      </p>
       <div className="flow">
         <AgentCard role="client" agent={client} active={active} fallback="alphascout" />
         <div className="wire">
@@ -178,9 +262,14 @@ function JobBoard({ jobs }: { jobs: Job[] }) {
   return (
     <section className="panel">
       <div className="panel__head">
-        <span className="panel__title">Job Board</span>
+        <span className="panel__title">Analysis Jobs</span>
+        <RiskLegend />
         <span className="panel__count">{jobs.length} total</span>
       </div>
+      <p className="panel__sub">
+        Each job advances: requested → quoted → paid → analyzing → delivered. The big number
+        is the repo's risk score (0–100); color shows the band.
+      </p>
       {jobs.length === 0 ? (
         <div className="empty">
           No jobs yet. Start the agents:
@@ -294,9 +383,10 @@ function Ticker({ events }: { events: BazaarEvent[] }) {
   return (
     <section className="panel" style={{ alignSelf: 'start' }}>
       <div className="panel__head">
-        <span className="panel__title">Live Feed</span>
+        <span className="panel__title">Activity Log</span>
         <span className="panel__count">{events.length} events</span>
       </div>
+      <p className="panel__sub">Every action both agents take, newest first.</p>
       <div className="ticker" ref={ref}>
         {recent.length === 0 ? (
           <div className="empty">Waiting for the first signal…</div>
