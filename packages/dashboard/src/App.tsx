@@ -9,6 +9,7 @@ import {
   type AgentNode,
   type Job,
 } from './lib/derive';
+import { TryIt } from './TryIt';
 import type { BazaarEvent } from './types';
 
 const initials = (name: string) => name.replace(/^@/, '').slice(0, 2).toUpperCase();
@@ -30,6 +31,8 @@ export function App() {
       <Header mode={mode} />
       <Hero />
       <HowItWorks />
+      <TryIt />
+      <div className="section-label">Behind the scenes · the autonomous economy</div>
       <ModeBanner mode={mode} />
       <StatBar stats={stats} />
       <div className="grid">
