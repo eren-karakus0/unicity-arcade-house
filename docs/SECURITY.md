@@ -15,33 +15,49 @@ security as part of the design rather than an afterthought.
   (via `parseTokenAmount` / `toHumanReadable`) — never JS floats.
 - **Isolated identities.** Each agent uses its own wallet data directory and
   `deviceId`.
-- **Known issue (low, upstream):** `npm audit` reports one low-severity advisory
-  for `elliptic`, a transitive dependency of `@unicitylabs/sphere-sdk`. No patched
-  version is published; it is outside our control and tracked for the SDK to fix.
+- **Audit posture.** `pnpm audit` reports advisories in two places, neither of
+  which is reachable by the running agents:
+  - **Dev-tooling only:** the critical/high/moderate advisories all sit under the
+    `vitest → vite → esbuild` chain (test-runner UI server, vite/esbuild dev
+    servers). We run tests headless (`vitest run`) and never start those servers,
+    and none of this ships in the agent runtime. Forcing the patched majors broke
+    the test suite (vitest 4 / vite peer mismatch), so we keep the working pinned
+    versions rather than degrade the suite for a non-reachable advisory.
+  - **Upstream (low):** `elliptic`, a transitive dependency of
+    `@unicitylabs/sphere-sdk`, with no patched version published — outside our
+    control, tracked for the SDK to fix.
 - **Operational note:** a freshly generated mnemonic is printed once to the
   console so the operator can save it. Console logs are gitignored (`*.log`); do
   not ship raw agent logs to a public sink.
 
-## Hardening requirements for the economy (M2)
+## Economy hardening — implemented in M2
 
-These MUST be implemented alongside the fetch and payment logic, because that is
-where untrusted input meets value transfer.
+The threats where untrusted input meets value transfer are handled in code:
 
-1. **Untrusted `repoUrl` → SSRF guard (high).** The analyst fetches data based on a
-   `repoUrl` received over DM. Requests must be **host-allowlisted** to
-   `github.com` / `api.github.com` and the `owner/repo` path strictly validated.
-   Reject anything else (internal hosts, IPs, redirects).
-2. **Treasury safety (high).** AlphaScout pays from a budget, so it must enforce:
-   - a hard **total budget cap** and a **max price per job**;
-   - **quote validation** — never pay a quote above the expected price;
-   - **idempotency** — a job is paid at most once;
-   - settlement only against a job it actually requested.
-3. **Message validation (medium).** `parseBazaarMessage` currently checks only the
-   `kind` discriminator. Before acting, every field must be validated (job id
-   shape, positive numeric amounts, known service id).
-4. **LLM prompt-injection containment (medium).** Repo-controlled text flows into
-   the Gemini prompt. The model's output is used **only** as summary prose — it
-   never drives payments, tool calls, or control flow.
+1. **Untrusted `repoUrl` → SSRF guard ✅.** The analyst validates every `repoUrl`
+   with `parseRepoUrl` **before any network call and before billing** — the host
+   is allowlisted to `github.com` and the `owner/repo` path is strictly checked
+   (internal IPs / other hosts / non-http schemes are rejected). Covered by unit
+   tests, including the `169.254.169.254` metadata-endpoint case.
+2. **Treasury safety ✅.** AlphaScout's `tryPay` enforces a hard **total budget
+   cap** and a **max price per job**, pays **idempotently** (a request id is paid
+   at most once), and settles **only against jobs it initiated this session**
+   (quote for one of its own `jobId`s) — so unsolicited or stale bills are never
+   paid. The cap check uses the **actual bill amount**, not the quoted price.
+3. **Message validation ✅ (baseline).** Inbound DMs are parsed by
+   `parseBazaarMessage` (kind discriminator) and the handlers re-check the service
+   id and required fields before acting; the analyst bills only after the repoUrl
+   validates.
+4. **LLM prompt-injection containment ✅.** Repo-controlled text flows into the
+   summarizer prompt, but the model output is used **only** as summary prose — it
+   never drives payments, swaps, or control flow.
+
+### Residual hardening (tracked for M3)
+
+- Verify `replyTo` matches the DM sender before billing (anti-spoofing).
+- Expire/evict stale entries from the analyst's `pending` and AlphaScout's
+  `quotes`/`bills` maps for long-running services.
+- Per-sender rate limiting on job-requests (cheap-spam mitigation).
 
 ## Reporting
 
