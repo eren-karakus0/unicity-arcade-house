@@ -18,8 +18,18 @@ import {
   AnalystService,
   ScoutClient,
   GameDealer,
+  GAME_LIST,
   createLogger,
 } from '@bazaar/core';
+
+/** Lightweight game catalog served to the dashboard's game hall. */
+const ARCADE_GAMES = GAME_LIST.map((g) => ({
+  id: g.id,
+  title: g.title,
+  blurb: g.blurb,
+  rewardMult: g.rewardMult,
+  inputKind: g.inputKind,
+}));
 
 const PORT = Number(process.env.PORT ?? process.env.BACKEND_PORT ?? 4500);
 const env = loadEnv();
@@ -155,13 +165,19 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // ---- Agent Arcade: provably-fair rock-paper-scissors vs the house ----
+  // ---- Agent Arcade: a hall of provably-fair games vs the autonomous house ----
   if (pathname === '/api/arcade/leaderboard') {
     if (!dealer) {
-      json(res, 200, { ready: false, house: null, rewardUct: 0, rows: [] });
+      json(res, 200, { ready: false, house: null, baseRewardUct: 0, games: ARCADE_GAMES, rows: [] });
       return;
     }
-    json(res, 200, { ready: true, house: dealer.house, rewardUct: dealer.rewardUct, rows: dealer.leaderboard() });
+    json(res, 200, {
+      ready: true,
+      house: dealer.house,
+      baseRewardUct: dealer.baseRewardUct,
+      games: ARCADE_GAMES,
+      rows: dealer.leaderboard(),
+    });
     return;
   }
 
@@ -172,8 +188,9 @@ const server = http.createServer((req, res) => {
     }
     void readJson(req).then((body) => {
       try {
+        const game = String(body.game ?? 'rps');
         const address = typeof body.address === 'string' ? body.address : undefined;
-        json(res, 200, dealer!.newRound(address));
+        json(res, 200, dealer!.newRound(game, address));
       } catch (e) {
         json(res, 429, { error: e instanceof Error ? e.message : 'could not start a round' });
       }
@@ -190,7 +207,7 @@ const server = http.createServer((req, res) => {
       try {
         const result = await dealer!.play({
           roundId: String(body.roundId ?? ''),
-          playerMove: body.move,
+          choice: body.choice,
           playerAddress: typeof body.address === 'string' ? body.address : undefined,
           name: typeof body.name === 'string' ? body.name : undefined,
         });

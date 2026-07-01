@@ -1,19 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWalletCtx } from './WalletContext';
 import {
   fetchLeaderboard,
   hasBackend,
+  makeClientSeed,
   newRound,
   playRound,
   verifyCommit,
+  verifyDice,
+  type GameMeta,
   type LeaderRow,
-  type Move,
   type NewRound,
   type PlayResult,
 } from './lib/arcade';
-
-const HAND: Record<Move, string> = { rock: '✊', paper: '✋', scissors: '✌️' };
-const MOVES: Move[] = ['rock', 'paper', 'scissors'];
+import { GAME_UI, GAMES_META } from './arcade/games-ui';
+import { BotMark } from './arcade/art';
 
 interface IdLike {
   nametag?: string;
@@ -28,62 +29,39 @@ const nameOf = (id: IdLike): string => {
   return 'anon';
 };
 
-/** Clean geometric "house agent" mark — a professional stand-in for an emoji. */
-function BotMark({ size = 72, className }: { size?: number; className?: string }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 64 64"
-      fill="none"
-      className={className}
-      role="img"
-      aria-label="house agent"
-    >
-      <defs>
-        <linearGradient id="botmark" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#FF9A4D" />
-          <stop offset="1" stopColor="#FF6F00" />
-        </linearGradient>
-      </defs>
-      <line x1="32" y1="7" x2="32" y2="17" stroke="url(#botmark)" strokeWidth="3" strokeLinecap="round" />
-      <circle cx="32" cy="6" r="3" fill="url(#botmark)" />
-      <rect x="11" y="17" width="42" height="34" rx="11" fill="url(#botmark)" />
-      <rect x="18" y="27" width="28" height="15" rx="7.5" fill="#0a0a0a" opacity="0.82" />
-      <circle cx="26" cy="34.5" r="3.4" fill="#FFB877" />
-      <circle cx="38" cy="34.5" r="3.4" fill="#FFB877" />
-      <rect x="24" y="55" width="16" height="4" rx="2" fill="url(#botmark)" opacity="0.5" />
-    </svg>
-  );
-}
-
 export function Arcade() {
   const wallet = useWalletCtx();
   const connected = wallet.status === 'connected' && !!wallet.identity;
 
-  const [ready, setReady] = useState<boolean | null>(null); // null = probing, false = waking
+  const [selected, setSelected] = useState('rps');
+  const [ready, setReady] = useState<boolean | null>(null);
   const [round, setRound] = useState<NewRound | null>(null);
   const [result, setResult] = useState<PlayResult | null>(null);
   const [verified, setVerified] = useState<boolean | null>(null);
   const [status, setStatus] = useState<'idle' | 'playing'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [board, setBoard] = useState<LeaderRow[]>([]);
+  const [games, setGames] = useState<GameMeta[]>(GAMES_META);
   const [house, setHouse] = useState<string | null>(null);
-  const [reward, setReward] = useState(1);
+  const [baseReward, setBaseReward] = useState(1);
   const dealing = useRef(false);
+
+  const meta = games.find((g) => g.id === selected) ?? GAMES_META.find((g) => g.id === selected)!;
+  const ui = GAME_UI[selected]!;
 
   const applyBoard = useCallback((b: Awaited<ReturnType<typeof fetchLeaderboard>>) => {
     setBoard(b.rows);
     if (b.house) setHouse(b.house);
-    if (b.rewardUct) setReward(b.rewardUct);
+    if (b.baseRewardUct) setBaseReward(b.baseRewardUct);
+    if (b.games?.length) setGames(b.games);
   }, []);
 
   const refreshBoard = useCallback(() => {
     void fetchLeaderboard().then(applyBoard).catch(() => {});
   }, [applyBoard]);
 
-  // Poll readiness — the free-tier backend cold-starts and its agents take a
-  // while to come up. Keep probing (which also warms it) until the dealer is up.
+  // Poll readiness — the free-tier backend cold-starts; keep probing (which
+  // warms it) until the dealer is live.
   useEffect(() => {
     if (!connected) return;
     let alive = true;
@@ -95,10 +73,10 @@ export function Arcade() {
         applyBoard(b);
         if (b.ready) {
           setReady(true);
-          return; // stop probing once the dealer is live
+          return;
         }
       } catch {
-        /* cold start / transient — keep trying */
+        /* cold start / transient */
       }
       if (!alive) return;
       setReady(false);
@@ -111,47 +89,65 @@ export function Arcade() {
     };
   }, [connected, applyBoard]);
 
-  const deal = useCallback(async () => {
-    if (!connected || dealing.current || !wallet.identity) return;
-    dealing.current = true;
-    setError(null);
-    try {
-      const r = await newRound(addressOf(wallet.identity));
-      setRound(r);
-      setHouse(r.house);
-      setReward(r.rewardUct);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Could not start a round.';
-      // A cold/booting backend isn't an error the player should see as a failure.
-      if (/timed out|waking up|failed to fetch|load failed/i.test(msg)) setReady(false);
-      else setError(msg);
-    } finally {
-      dealing.current = false;
-    }
-  }, [connected, wallet.identity]);
+  const deal = useCallback(
+    async (gameId: string) => {
+      if (!connected || dealing.current || !wallet.identity) return;
+      dealing.current = true;
+      setError(null);
+      try {
+        const r = await newRound(gameId, addressOf(wallet.identity));
+        setRound(r);
+        setHouse(r.house);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not start a round.';
+        if (/timed out|waking up|failed to fetch|load failed/i.test(msg)) setReady(false);
+        else setError(msg);
+      } finally {
+        dealing.current = false;
+      }
+    },
+    [connected, wallet.identity],
+  );
 
-  // Auto-deal once the dealer is live and nothing is in play.
+  // Auto-deal the selected game once the dealer is live and nothing is in play.
   useEffect(() => {
-    if (connected && ready && !round && !result) void deal();
-  }, [connected, ready, round, result, deal]);
+    if (connected && ready && !round && !result) void deal(selected);
+  }, [connected, ready, round, result, selected, deal]);
 
-  const pick = async (move: Move) => {
+  const selectGame = (id: string) => {
+    if (id === selected) return;
+    setSelected(id);
+    setRound(null);
+    setResult(null);
+    setVerified(null);
+    setError(null);
+  };
+
+  const play = async (choice: unknown) => {
     if (!round || status !== 'idle' || !wallet.identity) return;
     setStatus('playing');
     setError(null);
     try {
       const res = await playRound({
+        game: selected,
         roundId: round.roundId,
-        move,
+        choice,
         address: addressOf(wallet.identity),
         name: nameOf(wallet.identity),
       });
       setRound(null);
       setResult(res);
       setVerified(null);
-      verifyCommit(res.dealerMove, res.nonce, res.commit)
-        .then(setVerified)
-        .catch(() => setVerified(false));
+      void (async () => {
+        let ok = await verifyCommit(res.secret, res.nonce, res.commit);
+        if (ok && res.game === 'dice') {
+          ok = await verifyDice(res.secret, String(res.reveal.clientSeed), {
+            dealerRoll: Number(res.reveal.dealerRoll),
+            playerRoll: Number(res.reveal.playerRoll),
+          });
+        }
+        setVerified(ok);
+      })();
       refreshBoard();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Play failed.');
@@ -176,7 +172,7 @@ export function Arcade() {
   if (!connected) {
     return (
       <section className="arcade">
-        <ArcadeHero house={house} reward={reward} />
+        <Hero house={house} />
         <div className="empty empty--locked">
           <div className="empty__lock">🔒</div>
           <div>Connect your Unicity wallet to play and get paid.</div>
@@ -193,121 +189,136 @@ export function Arcade() {
   }
 
   const outcome = result?.outcome;
-  const houseFace: ReactNode = result ? (
-    HAND[result.dealerMove]
-  ) : status === 'playing' ? (
-    <span className="hand__ph">…</span>
-  ) : (
-    <BotMark />
-  );
 
   return (
     <section className="arcade">
-      <ArcadeHero house={house} reward={reward} />
+      <Hero house={house} />
 
-      <div className="arena">
-        <Hand
-          label="you"
-          face={result ? HAND[result.playerMove] : <span className="hand__ph">?</span>}
-          state={result ? (outcome === 'win' ? 'win' : outcome === 'lose' ? 'lose' : 'tie') : 'idle'}
-        />
-        <div className="arena__vs">
-          {result ? (
-            <div className={`verdict verdict--${outcome}`}>
-              {outcome === 'win' ? 'YOU WON' : outcome === 'lose' ? 'YOU LOST' : 'TIE'}
-            </div>
-          ) : (
-            <div className="arena__vs-txt">vs</div>
-          )}
-        </div>
-        <Hand
-          label="house"
-          face={houseFace}
-          state={result ? (outcome === 'lose' ? 'win' : outcome === 'win' ? 'lose' : 'tie') : 'idle'}
-        />
+      <div className="picker">
+        {games
+          .filter((g) => GAME_UI[g.id])
+          .map((g) => {
+            const Icon = GAME_UI[g.id]!.Icon;
+            return (
+              <button
+                key={g.id}
+                className={`gcard${g.id === selected ? ' gcard--on' : ''}`}
+                onClick={() => selectGame(g.id)}
+              >
+                <div className="gcard__art">
+                  <Icon size={40} />
+                </div>
+                <div className="gcard__title">{g.title}</div>
+                <div className="gcard__reward">win {baseReward * g.rewardMult} UCT</div>
+              </button>
+            );
+          })}
       </div>
 
-      {ready !== true ? (
-        <div className="commit commit--wait">
-          <span className="dot" /> waking the dealer… free-tier cold start, up to ~1 min
+      <div className="table">
+        <div className="table__head">
+          <span className="table__title">{meta.title}</span>
+          <span className="table__blurb">{meta.blurb}</span>
         </div>
-      ) : !result ? (
-        <>
-          {status === 'playing' ? (
-            <div className="commit commit--wait">
-              <span className="dot" /> revealing the dealer&apos;s move &amp; settling any payout on-chain…
-            </div>
-          ) : round ? (
-            <div className="commit">
-              🔒 <strong>fairness lock</strong> — the dealer&apos;s move is sealed now; pick yours, then verify it.
-              <div
-                className="commit__hash"
-                title="sha256(dealer's move + a secret nonce). This is NOT a transaction — it is the commitment that proves the dealer cannot change its move after seeing yours."
-              >
-                commitment <code>{round.commit.slice(0, 16)}…</code>
-              </div>
-            </div>
-          ) : (
-            <div className="commit commit--wait">
-              <span className="dot" /> dealing a fresh round…
-            </div>
-          )}
-          <div className="moves">
-            {MOVES.map((m) => (
-              <button
-                key={m}
-                className="move"
-                onClick={() => void pick(m)}
-                disabled={!round || status === 'playing'}
-                aria-label={m}
-              >
-                <span className="move__hand">{HAND[m]}</span>
-                <span className="move__name">{m}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      ) : (
-        <div className="outcome">
-          <div className="outcome__pay">
-            {outcome === 'win' ? (
-              result.paid ? (
-                <span className="pay pay--ok">✓ {result.rewardUct} UCT sent to your wallet</span>
-              ) : (
-                <span className="pay pay--pend">payout pending — {result.payoutError ?? 'retrying on testnet'}</span>
-              )
-            ) : outcome === 'tie' ? (
-              <span className="pay">a tie — no payout, go again</span>
-            ) : (
-              <span className="pay">the house took this one</span>
-            )}
-          </div>
-          {outcome === 'win' && result.paid && result.txId && (
-            <TxProof id={result.txId} delivery={result.delivery} />
-          )}
-          <div className="outcome__verify">
-            {verified === null ? (
-              <span className="verify verify--wait">verifying commitment…</span>
-            ) : verified ? (
-              <span className="verify verify--ok">
-                🔐 provably fair — reveal matches the commit ({HAND[result.dealerMove]} {result.dealerMove})
-              </span>
-            ) : (
-              <span className="verify verify--bad">⚠ commitment did not verify</span>
-            )}
-          </div>
-          <button className="again" onClick={again}>
-            Play again
-          </button>
-        </div>
-      )}
 
-      {error && <div className="tryit__error">⚠ {error}</div>}
+        <ui.Stage round={round} result={result} pending={status === 'playing'} />
+
+        {ready !== true ? (
+          <div className="commit commit--wait">
+            <span className="dot" /> waking the dealer… free-tier cold start, up to ~1 min
+          </div>
+        ) : !result ? (
+          <>
+            {status === 'playing' ? (
+              <div className="commit commit--wait">
+                <span className="dot" /> revealing &amp; settling any payout on-chain…
+              </div>
+            ) : round ? (
+              <div className="commit">
+                🔒 <strong>fairness lock</strong> — the house&apos;s hidden value is sealed now; play, then verify it.
+                <div
+                  className="commit__hash"
+                  title="sha256(the house's secret + a nonce). Not a transaction — the commitment proving the house can't change its value after you act."
+                >
+                  commitment <code>{round.commit.slice(0, 16)}…</code>
+                </div>
+              </div>
+            ) : (
+              <div className="commit commit--wait">
+                <span className="dot" /> dealing a fresh round…
+              </div>
+            )}
+
+            {meta.inputKind === 'seed' ? (
+              <div className="gbtns">
+                <button
+                  className="again"
+                  onClick={() => void play(makeClientSeed())}
+                  disabled={!round || status === 'playing'}
+                >
+                  {ui.rollLabel ?? 'Play'}
+                </button>
+              </div>
+            ) : (
+              <div className={`gbtns gbtns--${(ui.options?.(round) ?? []).length}`}>
+                {(ui.options?.(round) ?? []).map((o) => (
+                  <button
+                    key={o.key}
+                    className="gbtn"
+                    onClick={() => void play(o.choice)}
+                    disabled={!round || status === 'playing'}
+                    aria-label={o.name || o.key}
+                  >
+                    <span className="gbtn__art">{o.art}</span>
+                    {o.name && <span className="gbtn__name">{o.name}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="outcome">
+            <div className={`gverdict verdict--${outcome}`}>
+              {outcome === 'win' ? `YOU WON +${result.rewardUct} UCT` : outcome === 'lose' ? 'YOU LOST' : 'PUSH'}
+            </div>
+            <div className="outcome__pay">
+              {outcome === 'win' ? (
+                result.paid ? (
+                  <span className="pay pay--ok">✓ {result.rewardUct} UCT sent to your wallet</span>
+                ) : (
+                  <span className="pay pay--pend">payout pending — {result.payoutError ?? 'retrying on testnet'}</span>
+                )
+              ) : outcome === 'tie' ? (
+                <span className="pay">a push — no payout, go again</span>
+              ) : (
+                <span className="pay">the house took this one</span>
+              )}
+            </div>
+            {outcome === 'win' && result.paid && result.txId && (
+              <TxProof id={result.txId} delivery={result.delivery} />
+            )}
+            <div className="outcome__verify">
+              {verified === null ? (
+                <span className="verify verify--wait">verifying fairness…</span>
+              ) : verified ? (
+                <span className="verify verify--ok">🔐 provably fair — the reveal matches the sealed commitment</span>
+              ) : (
+                <span className="verify verify--bad">⚠ commitment did not verify</span>
+              )}
+            </div>
+            <button className="again" onClick={again}>
+              Play again
+            </button>
+          </div>
+        )}
+
+        {error && <div className="tryit__error">⚠ {error}</div>}
+      </div>
 
       <div className="board">
         <div className="board__head">
           <span className="board__title">Leaderboard</span>
-          <span className="board__note">top players · resets on redeploy</span>
+          <span className="board__note">across all games · resets on redeploy</span>
         </div>
         {board.length === 0 ? (
           <div className="empty">No games yet — be the first to beat the house.</div>
@@ -330,22 +341,22 @@ export function Arcade() {
   );
 }
 
-function ArcadeHero({ house, reward }: { house: string | null; reward: number }) {
+function Hero({ house }: { house: string | null }) {
   return (
     <div className="arcade__hero">
       <h2 className="arcade__title">Agent Arcade</h2>
       <p className="arcade__lede">
-        Rock–paper–scissors vs an autonomous house. Win and it sends you{' '}
-        <span className="ink-accent">{reward} UCT</span> on-chain, automatically.
+        A hall of provably-fair games vs an autonomous house. Win and it pays you real testnet UCT
+        on-chain — automatically, no human in the loop.
       </p>
       <div className="arcade__meta">
         <span className="arcade__chip arcade__chip--house">
           <BotMark size={15} /> house {house ? `@${house}` : '…'}
         </span>
-        <span className="arcade__chip">{reward} UCT / win</span>
-        <span className="arcade__chip" title="The dealer commits sha256(move:nonce) before you pick.">
+        <span className="arcade__chip" title="Every game commits sha256(secret:nonce) before you act.">
           provably fair
         </span>
+        <span className="arcade__chip">on-chain payouts</span>
       </div>
     </div>
   );
@@ -377,15 +388,6 @@ function TxProof({ id, delivery }: { id: string; delivery?: string }) {
       <button className="txproof__copy" onClick={copy}>
         {copied ? 'copied ✓' : 'copy id'}
       </button>
-    </div>
-  );
-}
-
-function Hand({ label, face, state }: { label: string; face: ReactNode; state: 'idle' | 'win' | 'lose' | 'tie' }) {
-  return (
-    <div className={`hand hand--${state}`}>
-      <div className="hand__face">{face}</div>
-      <div className="hand__label">{label}</div>
     </div>
   );
 }

@@ -1,4 +1,8 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+
+// Commit/nonce helpers now live in ./rng (shared by every arcade game); re-export
+// them here so existing imports of `commitHash` / `makeNonce` keep working.
+export { commitHash, makeNonce } from './rng.js';
 
 /**
  * Rock–paper–scissors primitives, kept pure and dependency-free so they are
@@ -34,11 +38,3 @@ export function randomMove(): Move {
   return MOVES[byte % 3] as Move;
 }
 
-export function makeNonce(): string {
-  return randomBytes(16).toString('hex');
-}
-
-/** The dealer's commitment: sha256 of the move + a secret nonce. */
-export function commitHash(move: Move, nonce: string): string {
-  return createHash('sha256').update(`${move}:${nonce}`).digest('hex');
-}

@@ -1,28 +1,39 @@
 /**
- * Client for the Agent Arcade — a provably-fair rock-paper-scissors house.
- * The dealer commits sha256(move:nonce) before you pick; after the reveal the
- * browser re-hashes it (verifyCommit) to prove the move was fixed in advance.
+ * Client for the Agent Arcade — a hall of provably-fair games. The house
+ * commits sha256(secret:nonce) before you act; after the reveal the browser
+ * re-hashes it (verifyCommit) to prove the secret was fixed in advance. Dice
+ * additionally re-derives both rolls from the two seeds (verifyDice).
  */
 import { BACKEND_URL, hasBackend } from './backend';
 
-export type Move = 'rock' | 'paper' | 'scissors';
 export type Outcome = 'win' | 'lose' | 'tie';
 
+export interface GameMeta {
+  id: string;
+  title: string;
+  blurb: string;
+  rewardMult: number;
+  inputKind: 'choice' | 'seed';
+}
+
 export interface NewRound {
+  game: string;
   roundId: string;
   commit: string;
   rewardUct: number;
   house: string;
+  publicState?: Record<string, unknown>;
 }
 
 export interface PlayResult {
+  game: string;
   roundId: string;
-  playerMove: Move;
-  dealerMove: Move;
-  nonce: string;
-  commit: string;
   outcome: Outcome;
   rewardUct: number;
+  commit: string;
+  secret: string;
+  nonce: string;
+  reveal: Record<string, unknown>;
   paid: boolean;
   payoutError?: string;
   txId?: string;
@@ -42,7 +53,8 @@ export interface LeaderRow {
 export interface Leaderboard {
   ready: boolean;
   house: string | null;
-  rewardUct: number;
+  baseRewardUct: number;
+  games: GameMeta[];
   rows: LeaderRow[];
 }
 
@@ -60,30 +72,54 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return d;
 }
 
-export function newRound(address?: string): Promise<NewRound> {
-  return post<NewRound>('/api/arcade/new', { address });
+export function newRound(game: string, address?: string): Promise<NewRound> {
+  return post<NewRound>('/api/arcade/new', { game, address });
 }
 
 export function playRound(input: {
+  game: string;
   roundId: string;
-  move: Move;
+  choice: unknown;
   address?: string;
   name?: string;
 }): Promise<PlayResult> {
-  return post<PlayResult>('/api/arcade/play', input);
+  return post<PlayResult>('/api/arcade/play', {
+    roundId: input.roundId,
+    choice: input.choice,
+    address: input.address,
+    name: input.name,
+  });
 }
 
 export async function fetchLeaderboard(): Promise<Leaderboard> {
-  const r = await fetch(`${BACKEND_URL}/api/arcade/leaderboard`, {
-    signal: AbortSignal.timeout(8_000),
-  });
+  const r = await fetch(`${BACKEND_URL}/api/arcade/leaderboard`, { signal: AbortSignal.timeout(8_000) });
   return (await r.json()) as Leaderboard;
 }
 
-/** Re-hash the reveal to confirm the dealer never changed its committed move. */
-export async function verifyCommit(move: string, nonce: string, commit: string): Promise<boolean> {
-  const data = new TextEncoder().encode(`${move}:${nonce}`);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  return hex === commit;
+async function sha256Hex(s: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Re-hash the reveal to confirm the house never changed its committed secret. */
+export async function verifyCommit(secret: string, nonce: string, commit: string): Promise<boolean> {
+  return (await sha256Hex(`${secret}:${nonce}`)) === commit;
+}
+
+/** Recompute both dice from the two seeds — mirrors the server's deriveDicePair. */
+export async function verifyDice(
+  server: string,
+  client: string,
+  expected: { dealerRoll: number; playerRoll: number },
+): Promise<boolean> {
+  const h = await sha256Hex(`${server}:${client}`);
+  const house = (parseInt(h.slice(0, 8), 16) % 6) + 1;
+  const player = (parseInt(h.slice(8, 16), 16) % 6) + 1;
+  return house === expected.dealerRoll && player === expected.playerRoll;
+}
+
+export function makeClientSeed(): string {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
