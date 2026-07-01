@@ -1350,3 +1350,19 @@
 .brow__name { color: var(--text-primary); word-break: break-all; }
 .brow__wl { color: var(--text-muted); font-size: 11px; }
 .brow__earned { color: var(--accent); }
+
+.hand--idle .hand__face { color: var(--text-faint); }
+.hand__ph { font-family: var(--font-display); }
+.arcade__chip--house { display: inline-flex; align-items: center; gap: 6px; }
+.commit--wait { color: var(--accent); }
+.commit--wait .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}

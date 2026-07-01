@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useWalletCtx } from './WalletContext';
 import {
   fetchLeaderboard,
@@ -28,10 +28,40 @@ const nameOf = (id: IdLike): string => {
   return 'anon';
 };
 
+/** Clean geometric "house agent" mark — a professional stand-in for an emoji. */
+function BotMark({ size = 72, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      className={className}
+      role="img"
+      aria-label="house agent"
+    >
+      <defs>
+        <linearGradient id="botmark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#FF9A4D" />
+          <stop offset="1" stopColor="#FF6F00" />
+        </linearGradient>
+      </defs>
+      <line x1="32" y1="7" x2="32" y2="17" stroke="url(#botmark)" strokeWidth="3" strokeLinecap="round" />
+      <circle cx="32" cy="6" r="3" fill="url(#botmark)" />
+      <rect x="11" y="17" width="42" height="34" rx="11" fill="url(#botmark)" />
+      <rect x="18" y="27" width="28" height="15" rx="7.5" fill="#0a0a0a" opacity="0.82" />
+      <circle cx="26" cy="34.5" r="3.4" fill="#FFB877" />
+      <circle cx="38" cy="34.5" r="3.4" fill="#FFB877" />
+      <rect x="24" y="55" width="16" height="4" rx="2" fill="url(#botmark)" opacity="0.5" />
+    </svg>
+  );
+}
+
 export function Arcade() {
   const wallet = useWalletCtx();
   const connected = wallet.status === 'connected' && !!wallet.identity;
 
+  const [ready, setReady] = useState<boolean | null>(null); // null = probing, false = waking
   const [round, setRound] = useState<NewRound | null>(null);
   const [result, setResult] = useState<PlayResult | null>(null);
   const [verified, setVerified] = useState<boolean | null>(null);
@@ -42,19 +72,44 @@ export function Arcade() {
   const [reward, setReward] = useState(1);
   const dealing = useRef(false);
 
-  const refreshBoard = useCallback(() => {
-    void fetchLeaderboard()
-      .then((b) => {
-        setBoard(b.rows);
-        if (b.house) setHouse(b.house);
-        if (b.rewardUct) setReward(b.rewardUct);
-      })
-      .catch(() => {});
+  const applyBoard = useCallback((b: Awaited<ReturnType<typeof fetchLeaderboard>>) => {
+    setBoard(b.rows);
+    if (b.house) setHouse(b.house);
+    if (b.rewardUct) setReward(b.rewardUct);
   }, []);
 
+  const refreshBoard = useCallback(() => {
+    void fetchLeaderboard().then(applyBoard).catch(() => {});
+  }, [applyBoard]);
+
+  // Poll readiness — the free-tier backend cold-starts and its agents take a
+  // while to come up. Keep probing (which also warms it) until the dealer is up.
   useEffect(() => {
-    refreshBoard();
-  }, [refreshBoard]);
+    if (!connected) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const probe = async () => {
+      try {
+        const b = await fetchLeaderboard();
+        if (!alive) return;
+        applyBoard(b);
+        if (b.ready) {
+          setReady(true);
+          return; // stop probing once the dealer is live
+        }
+      } catch {
+        /* cold start / transient — keep trying */
+      }
+      if (!alive) return;
+      setReady(false);
+      timer = setTimeout(probe, 5000);
+    };
+    void probe();
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [connected, applyBoard]);
 
   const deal = useCallback(async () => {
     if (!connected || dealing.current || !wallet.identity) return;
@@ -66,16 +121,19 @@ export function Arcade() {
       setHouse(r.house);
       setReward(r.rewardUct);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not start a round.');
+      const msg = e instanceof Error ? e.message : 'Could not start a round.';
+      // A cold/booting backend isn't an error the player should see as a failure.
+      if (/timed out|waking up|failed to fetch|load failed/i.test(msg)) setReady(false);
+      else setError(msg);
     } finally {
       dealing.current = false;
     }
   }, [connected, wallet.identity]);
 
-  // Auto-deal a fresh round whenever we're connected with none in play.
+  // Auto-deal once the dealer is live and nothing is in play.
   useEffect(() => {
-    if (connected && !round && !result) void deal();
-  }, [connected, round, result, deal]);
+    if (connected && ready && !round && !result) void deal();
+  }, [connected, ready, round, result, deal]);
 
   const pick = async (move: Move) => {
     if (!round || status !== 'idle' || !wallet.identity) return;
@@ -118,13 +176,7 @@ export function Arcade() {
   if (!connected) {
     return (
       <section className="arcade">
-        <div className="arcade__hero">
-          <h2 className="arcade__title">Agent Arcade</h2>
-          <p className="arcade__lede">
-            Play rock–paper–scissors against an autonomous house agent. Beat it and it pays you
-            real testnet UCT on-chain — no human in the loop. Provably fair.
-          </p>
-        </div>
+        <ArcadeHero house={house} reward={reward} />
         <div className="empty empty--locked">
           <div className="empty__lock">🔒</div>
           <div>Connect your Unicity wallet to play and get paid.</div>
@@ -141,28 +193,22 @@ export function Arcade() {
   }
 
   const outcome = result?.outcome;
+  const houseFace: ReactNode = result ? (
+    HAND[result.dealerMove]
+  ) : status === 'playing' ? (
+    <span className="hand__ph">…</span>
+  ) : (
+    <BotMark />
+  );
 
   return (
     <section className="arcade">
-      <div className="arcade__hero">
-        <h2 className="arcade__title">Agent Arcade</h2>
-        <p className="arcade__lede">
-          Rock–paper–scissors vs an autonomous house. Win and it sends you{' '}
-          <span className="ink-accent">{reward} UCT</span> on-chain, automatically.
-        </p>
-        <div className="arcade__meta">
-          <span className="arcade__chip">🤖 house {house ? `@${house}` : '…'}</span>
-          <span className="arcade__chip">🎁 {reward} UCT / win</span>
-          <span className="arcade__chip" title="The dealer commits sha256(move:nonce) before you pick.">
-            🔐 provably fair
-          </span>
-        </div>
-      </div>
+      <ArcadeHero house={house} reward={reward} />
 
       <div className="arena">
         <Hand
           label="you"
-          face={result ? HAND[result.playerMove] : '❔'}
+          face={result ? HAND[result.playerMove] : <span className="hand__ph">?</span>}
           state={result ? (outcome === 'win' ? 'win' : outcome === 'lose' ? 'lose' : 'tie') : 'idle'}
         />
         <div className="arena__vs">
@@ -176,12 +222,16 @@ export function Arcade() {
         </div>
         <Hand
           label="house"
-          face={result ? HAND[result.dealerMove] : status === 'playing' ? '⏳' : '🤖'}
+          face={houseFace}
           state={result ? (outcome === 'lose' ? 'win' : outcome === 'win' ? 'lose' : 'tie') : 'idle'}
         />
       </div>
 
-      {!result ? (
+      {ready !== true ? (
+        <div className="commit commit--wait">
+          <span className="dot" /> waking the dealer… free-tier cold start, up to ~1 min
+        </div>
+      ) : !result ? (
         <>
           <div className="commit" title={round?.commit}>
             {round ? (
@@ -267,7 +317,28 @@ export function Arcade() {
   );
 }
 
-function Hand({ label, face, state }: { label: string; face: string; state: 'idle' | 'win' | 'lose' | 'tie' }) {
+function ArcadeHero({ house, reward }: { house: string | null; reward: number }) {
+  return (
+    <div className="arcade__hero">
+      <h2 className="arcade__title">Agent Arcade</h2>
+      <p className="arcade__lede">
+        Rock–paper–scissors vs an autonomous house. Win and it sends you{' '}
+        <span className="ink-accent">{reward} UCT</span> on-chain, automatically.
+      </p>
+      <div className="arcade__meta">
+        <span className="arcade__chip arcade__chip--house">
+          <BotMark size={15} /> house {house ? `@${house}` : '…'}
+        </span>
+        <span className="arcade__chip">{reward} UCT / win</span>
+        <span className="arcade__chip" title="The dealer commits sha256(move:nonce) before you pick.">
+          provably fair
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Hand({ label, face, state }: { label: string; face: ReactNode; state: 'idle' | 'win' | 'lose' | 'tie' }) {
   return (
     <div className={`hand hand--${state}`}>
       <div className="hand__face">{face}</div>
