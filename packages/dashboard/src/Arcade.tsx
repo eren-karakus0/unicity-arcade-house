@@ -16,6 +16,7 @@ import {
 } from './lib/arcade';
 import { GAME_UI, GAMES_META } from './arcade/games-ui';
 import { BotMark, Flame } from './arcade/art';
+import { WinBurst } from './arcade/fx';
 
 interface IdLike {
   nametag?: string;
@@ -224,6 +225,7 @@ export function Arcade() {
       </div>
 
       <div className="table">
+        {outcome === 'win' && <WinBurst key={result!.nonce} />}
         <div className="table__head">
           <span className="table__title">{meta.title}</span>
           <span className="table__blurb">{meta.blurb}</span>
@@ -394,7 +396,11 @@ function EventsBar({
   return (
     <div className="events">
       <div className="events__streak">
-        <Flame size={22} dim={streak === 0} />
+        <span
+          className={`events__flame${streak > 0 ? ' events__flame--lit' : ''}${streak >= 5 ? ' events__flame--hot' : ''}`}
+        >
+          <Flame size={20 + Math.min(streak, 10) * 1.5} dim={streak === 0} />
+        </span>
         <span className="events__streak-n">{streak > 0 ? `${streak} win streak` : 'no streak yet'}</span>
         {!!you && you.best > 0 && <span className="events__best">best {you.best}</span>}
       </div>

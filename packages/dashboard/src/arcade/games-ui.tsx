@@ -8,9 +8,11 @@ import {
   Die,
   DieBlank,
   HandOf,
+  HandRock,
   HandScissors,
   NumberTile,
 } from './art';
+import { CyclingTile, TumblingDie } from './fx';
 
 export const GAMES_META: GameMeta[] = [
   { id: 'rps', title: 'Rock · Paper · Scissors', blurb: 'Beat the house’s sealed move.', rewardMult: 1, inputKind: 'choice' },
@@ -69,15 +71,50 @@ function Solo({ children, caption }: { children: ReactNode; caption?: string }) 
 const num = (v: unknown) => Number(v);
 const str = (v: unknown) => (v == null ? undefined : String(v));
 
+/** One-shot reveal animations — remount per result so they replay. */
+const Pop = ({ children }: { children: ReactNode }) => <span className="anim-pop">{children}</span>;
+const Flip = ({ children }: { children: ReactNode }) => <span className="anim-flip">{children}</span>;
+
 export const GAME_UI: Record<string, GameUI> = {
   rps: {
     Icon: ({ size }) => <HandScissors size={size} />,
-    Stage: ({ result }) => (
-      <Duo
-        you={<HandOf move={result ? str(result.reveal.playerMove) : undefined} size={82} />}
-        house={result ? <HandOf move={str(result.reveal.dealerMove)} size={82} /> : <BotMark size={82} />}
-      />
-    ),
+    Stage: ({ result, pending }) =>
+      pending ? (
+        // the classic "rock… paper… scissors…" shake while the house resolves
+        <Duo
+          you={
+            <span className="anim-fist">
+              <HandRock size={82} />
+            </span>
+          }
+          house={
+            <span className="anim-fist anim-fist--alt">
+              <HandRock size={82} />
+            </span>
+          }
+        />
+      ) : (
+        <Duo
+          you={
+            result ? (
+              <Pop>
+                <HandOf move={str(result.reveal.playerMove)} size={82} />
+              </Pop>
+            ) : (
+              <HandOf size={82} />
+            )
+          }
+          house={
+            result ? (
+              <Pop>
+                <HandOf move={str(result.reveal.dealerMove)} size={82} />
+              </Pop>
+            ) : (
+              <BotMark size={82} />
+            )
+          }
+        />
+      ),
     options: () => [
       { key: 'rock', art: <HandOf move="rock" size={40} />, name: 'rock', choice: 'rock' },
       { key: 'paper', art: <HandOf move="paper" size={40} />, name: 'paper', choice: 'paper' },
@@ -86,19 +123,59 @@ export const GAME_UI: Record<string, GameUI> = {
   },
   dice: {
     Icon: ({ size }) => <Die n={5} size={size} />,
-    Stage: ({ result }) => (
+    Stage: ({ result, pending }) => (
       <Duo
-        you={result ? <Die n={num(result.reveal.playerRoll)} size={78} /> : <DieBlank size={78} />}
-        house={result ? <Die n={num(result.reveal.dealerRoll)} size={78} accent /> : <BotMark size={78} />}
+        you={
+          pending ? (
+            <TumblingDie size={78} />
+          ) : result ? (
+            <Pop>
+              <Die n={num(result.reveal.playerRoll)} size={78} />
+            </Pop>
+          ) : (
+            <DieBlank size={78} />
+          )
+        }
+        house={
+          pending ? (
+            <TumblingDie size={78} accent />
+          ) : result ? (
+            <Pop>
+              <Die n={num(result.reveal.dealerRoll)} size={78} accent />
+            </Pop>
+          ) : (
+            <BotMark size={78} />
+          )
+        }
       />
     ),
     rollLabel: 'Roll the dice',
   },
   coin: {
     Icon: ({ size }) => <Coin side="heads" size={size} />,
-    Stage: ({ round, result }) => (
-      <Solo caption={result ? `you called ${str(result.reveal.call)}` : round ? 'coin sealed — call it' : ''}>
-        {result ? <Coin side={str(result.reveal.result) as 'heads' | 'tails'} size={120} /> : <CoinBlank size={120} />}
+    Stage: ({ round, result, pending }) => (
+      <Solo
+        caption={
+          pending
+            ? 'in the air…'
+            : result
+              ? `you called ${str(result.reveal.call)}`
+              : round
+                ? 'coin sealed — call it'
+                : ''
+        }
+      >
+        {pending ? (
+          <span className="anim-cointoss">
+            <Coin side="heads" size={120} />
+          </span>
+        ) : result ? (
+          <Flip>
+            <Coin side={str(result.reveal.result) as 'heads' | 'tails'} size={120} />
+          </Flip>
+        ) : (
+          <CoinBlank size={120} />
+        )}
       </Solo>
     ),
     options: () => [
@@ -108,12 +185,22 @@ export const GAME_UI: Record<string, GameUI> = {
   },
   highlow: {
     Icon: ({ size }) => <Card rank={13} size={size} />,
-    Stage: ({ round, result }) => {
+    Stage: ({ round, result, pending }) => {
       const current = result ? num(result.reveal.current) : num(round?.publicState?.current);
       return (
         <Duo
           you={<Card rank={Number.isFinite(current) ? current : undefined} size={84} />}
-          house={result ? <Card rank={num(result.reveal.next)} size={84} /> : <Card hidden size={84} />}
+          house={
+            result ? (
+              <Flip>
+                <Card rank={num(result.reveal.next)} size={84} />
+              </Flip>
+            ) : (
+              <span className={pending ? 'anim-cardwait' : undefined}>
+                <Card hidden size={84} />
+              </span>
+            )
+          }
         />
       );
     },
@@ -124,9 +211,27 @@ export const GAME_UI: Record<string, GameUI> = {
   },
   number: {
     Icon: ({ size }) => <NumberTile hidden size={size} />,
-    Stage: ({ round, result }) => (
-      <Solo caption={result ? `you guessed ${str(result.reveal.guess)}` : round ? 'a number 1–6 is sealed' : ''}>
-        {result ? <NumberTile value={num(result.reveal.secret)} size={110} /> : <NumberTile hidden size={110} />}
+    Stage: ({ round, result, pending }) => (
+      <Solo
+        caption={
+          pending
+            ? 'unsealing…'
+            : result
+              ? `you guessed ${str(result.reveal.guess)}`
+              : round
+                ? 'a number 1–6 is sealed'
+                : ''
+        }
+      >
+        {pending ? (
+          <CyclingTile size={110} />
+        ) : result ? (
+          <Flip>
+            <NumberTile value={num(result.reveal.secret)} size={110} />
+          </Flip>
+        ) : (
+          <NumberTile hidden size={110} />
+        )}
       </Solo>
     ),
     options: () =>
