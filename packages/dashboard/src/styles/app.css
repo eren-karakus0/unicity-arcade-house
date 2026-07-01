@@ -90,6 +90,31 @@
   letter-spacing: 0.08em;
 }
 
+/* footer */
+.footer {
+  margin-top: 40px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.footer span + span::before {
+  content: '·';
+  margin-right: 12px;
+  color: var(--border-focus);
+}
+.footer__brand {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
 /* connect wallet */
 .wallet {
   font-family: var(--font-mono);

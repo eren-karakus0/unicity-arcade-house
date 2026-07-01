@@ -41,8 +41,9 @@ function Header() {
 function Footer() {
   return (
     <footer className="footer">
-      <span>UNICITY ARCADE HOUSE — provably-fair games · on-chain payouts</span>
-      <span>built on the Sphere SDK · Unicity testnet2</span>
+      <span className="footer__brand">Unicity Arcade House</span>
+      <span>Provably-fair games, on-chain payouts</span>
+      <span>Built on the Sphere SDK · testnet2</span>
     </footer>
   );
 }
