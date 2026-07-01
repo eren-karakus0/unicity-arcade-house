@@ -7,9 +7,11 @@ visitor-driven economy.
 ## 1. Backend → Render (free)
 
 1. Push this repo to GitHub (done).
-2. Render → **New → Blueprint** → select this repo. It reads `render.yaml`
-   (build `pnpm install`, start `pnpm --filter @bazaar/backend start`, health
-   check `/api/health`).
+2. Render → **New → Blueprint** → select this repo. It reads `render.yaml`.
+   (Or **New Web Service** manually with the same commands below.)
+   - **Build Command:** `npx --yes pnpm@10.28.1 install --frozen-lockfile`
+   - **Start Command:** `npx --yes pnpm@10.28.1 --filter @bazaar/backend run start`
+   - **Health Check Path:** `/api/health` · **Node:** pinned to 22 via `.node-version`
 3. Create the service. On the **first run** the agents auto-generate wallets and
    print their recovery phrases to the logs, e.g.:
    ```

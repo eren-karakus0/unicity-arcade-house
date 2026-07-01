@@ -7,8 +7,8 @@ services:
     runtime: node
     plan: free
     region: frankfurt
-    buildCommand: corepack enable && pnpm install --frozen-lockfile
-    startCommand: pnpm --filter @bazaar/backend start
+    buildCommand: npx --yes pnpm@10.28.1 install --frozen-lockfile
+    startCommand: npx --yes pnpm@10.28.1 --filter @bazaar/backend run start
     healthCheckPath: /api/health
     envVars:
       - key: SPHERE_NETWORK
