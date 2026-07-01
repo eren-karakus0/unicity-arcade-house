@@ -1,0 +1,35 @@
+# Render Blueprint for the live agent-economy backend.
+# In Render: New → Blueprint → pick this repo. Then set the secret env vars
+# (marked sync:false) in the dashboard. See docs/DEPLOY.md.
+services:
+  - type: web
+    name: sphere-agent-bazaar-backend
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    startCommand: pnpm --filter @bazaar/backend start
+    healthCheckPath: /api/health
+    envVars:
+      - key: SPHERE_NETWORK
+        value: testnet
+      # Public testnet2 gateway key (documented as non-secret).
+      - key: SPHERE_ORACLE_API_KEY
+        value: sk_ddc3cfcc001e4a28ac3fad7407f99590
+      - key: SPHERE_WALLET_API_URL
+        value: https://wallet-api.unicity.network
+      # Hosted agent identities (kept distinct from any local wallets).
+      - key: ANALYST_NAMETAG
+        value: analyst-bzr
+      - key: ALPHASCOUT_NAMETAG
+        value: scout-bzr
+      # Set these (from the first-run logs) for stable identities across restarts.
+      - key: ANALYST_MNEMONIC
+        sync: false
+      - key: ALPHASCOUT_MNEMONIC
+        sync: false
+      # Optional: raises GitHub rate limits; enables Gemini summaries.
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
