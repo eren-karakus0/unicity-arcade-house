@@ -142,7 +142,7 @@ export function Arcade() {
       });
       setRound(null);
       setResult(res);
-      setYou({ streak: res.streak, best: res.best, daily: res.daily });
+      if (res.daily) setYou({ streak: res.streak, best: res.best, daily: res.daily });
       setVerified(null);
       void (async () => {
         let ok = await verifyCommit(res.secret, res.nonce, res.commit);
@@ -386,9 +386,9 @@ function EventsBar({
   dailyDef: { goal: number; reward: number } | null;
 }) {
   const streak = you?.streak ?? 0;
-  const goal = you?.daily.goal ?? dailyDef?.goal ?? 5;
-  const wins = you?.daily.wins ?? 0;
-  const claimed = you?.daily.claimed ?? false;
+  const goal = you?.daily?.goal ?? dailyDef?.goal ?? 5;
+  const wins = you?.daily?.wins ?? 0;
+  const claimed = you?.daily?.claimed ?? false;
   const reward = dailyDef?.reward ?? 10;
   const pct = claimed ? 100 : Math.min(100, Math.round((wins / goal) * 100));
   return (
