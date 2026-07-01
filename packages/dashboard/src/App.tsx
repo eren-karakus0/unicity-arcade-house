@@ -176,11 +176,31 @@ function StatStrip({ stats }: { stats: ReturnType<typeof deriveStats> }) {
   return (
     <div className="statstrip">
       {items.map((it) => (
-        <div className="statcell" key={it.label}>
-          <span className={`statcell__v${it.accent ? ' statcell__v--accent' : ''}`}>{it.value}</span>
-          <span className="statcell__l">{it.label}</span>
-        </div>
+        <StatCell key={it.label} label={it.label} value={it.value} accent={it.accent} />
       ))}
+    </div>
+  );
+}
+
+function StatCell({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  const prev = useRef(value);
+  const [bump, setBump] = useState(false);
+  useEffect(() => {
+    if (prev.current !== value) {
+      prev.current = value;
+      setBump(true);
+      const t = setTimeout(() => setBump(false), 620);
+      return () => clearTimeout(t);
+    }
+  }, [value]);
+  return (
+    <div className="statcell">
+      <span
+        className={`statcell__v${accent ? ' statcell__v--accent' : ''}${bump ? ' statcell__v--bump' : ''}`}
+      >
+        {value}
+      </span>
+      <span className="statcell__l">{label}</span>
     </div>
   );
 }
@@ -203,11 +223,27 @@ function LiveTag({ mode }: { mode: FeedMode }) {
 }
 
 /* ---------------- Flow diagram ---------------- */
+type PhaseKind = 'idle' | 'hire' | 'quote' | 'pay' | 'analyze' | 'deliver' | 'reject';
+interface Phase {
+  kind: PhaseKind;
+  repo?: string;
+}
+const PHASE_TEXT: Record<PhaseKind, string> = {
+  idle: 'idle · waiting for the next job',
+  hire: 'client is hiring the analyst',
+  quote: 'analyst returned a quote',
+  pay: 'client is paying on-chain',
+  analyze: 'analyst is analyzing the repo',
+  deliver: 'report delivered',
+  reject: 'job rejected',
+};
+
 interface Pulse {
   id: string;
-  kind: 'pay' | 'deliver';
+  kind: 'hire' | 'quote' | 'pay' | 'deliver';
   label: string;
 }
+
 function FlowPanel({
   client,
   provider,
@@ -222,28 +258,81 @@ function FlowPanel({
   mode: FeedMode;
 }) {
   const [pulses, setPulses] = useState<Pulse[]>([]);
+  const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const lastLen = useRef(0);
+  const seeded = useRef(false);
+  const repoRef = useRef<string | undefined>(undefined);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const fresh = events.slice(lastLen.current);
     lastLen.current = events.length;
+
+    // Adopt the initial backlog silently — don't replay every past pulse on load.
+    if (!seeded.current) {
+      seeded.current = true;
+      return;
+    }
+
+    let nextPhase: Phase | null = null;
     for (const e of fresh) {
+      if (e.repo) repoRef.current = e.repo;
       let p: Pulse | null = null;
-      if (e.type === 'payment:sent') p = { id: rid(), kind: 'pay', label: `${e.amountUct} UCT` };
-      else if (e.type === 'job:delivered' && e.role === 'provider')
-        p = { id: rid(), kind: 'deliver', label: 'report' };
+      switch (e.type) {
+        case 'job:requested':
+          if (e.role === 'client') {
+            p = { id: rid(), kind: 'hire', label: 'job' };
+            nextPhase = { kind: 'hire', repo: e.repo };
+          }
+          break;
+        case 'job:quoted':
+          p = { id: rid(), kind: 'quote', label: `${e.amountUct} UCT` };
+          nextPhase = { kind: 'quote', repo: e.repo };
+          break;
+        case 'payment:sent':
+          p = { id: rid(), kind: 'pay', label: `${e.amountUct} UCT` };
+          nextPhase = { kind: 'pay', repo: repoRef.current };
+          break;
+        case 'job:analyzing':
+          nextPhase = { kind: 'analyze', repo: e.repo };
+          break;
+        case 'job:delivered':
+          if (e.role === 'provider') {
+            p = { id: rid(), kind: 'deliver', label: 'report' };
+            nextPhase = { kind: 'deliver', repo: e.repo };
+          }
+          break;
+        case 'job:rejected':
+          nextPhase = { kind: 'reject' };
+          break;
+      }
       if (p) {
         const pulse = p;
         setPulses((cur) => [...cur, pulse]);
         setTimeout(() => setPulses((cur) => cur.filter((x) => x.id !== pulse.id)), 1400);
       }
     }
+
+    if (nextPhase) {
+      setPhase(nextPhase);
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+      idleTimer.current = setTimeout(() => setPhase({ kind: 'idle' }), 7000);
+    }
   }, [events]);
 
-  const active = pulses.length > 0;
+  useEffect(
+    () => () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+    },
+    [],
+  );
+
+  const active = phase.kind !== 'idle';
+  const clientBusy = phase.kind === 'hire' || phase.kind === 'pay';
+  const providerBusy = phase.kind === 'quote' || phase.kind === 'analyze' || phase.kind === 'deliver';
 
   return (
-    <section className="panel flowpanel">
+    <section className={`panel flowpanel${active ? ' flowpanel--live' : ''}`}>
       <div className="panel__head">
         <span className="panel__title">Economy Flow</span>
         <LiveTag mode={mode} />
@@ -253,15 +342,20 @@ function FlowPanel({
         is a payment, a <span className="ink-white">white</span> pulse is a delivered report.
       </p>
       <div className="flow">
-        <AgentCard role="client" agent={client} active={active} fallback="alphascout" />
-        <div className="wire">
+        <AgentCard role="client" agent={client} busy={clientBusy} phase={phase} fallback="alphascout" />
+        <div className={`wire${active ? ' wire--live' : ''}`}>
+          <span className="wire__energy" />
+          <span className={`wire__label${active ? ' wire__label--on' : ''}`}>
+            {PHASE_TEXT[phase.kind]}
+            {phase.repo ? ` · ${phase.repo}` : ''}
+          </span>
           {pulses.map((p) => (
             <span key={p.id} className={`pulse pulse--${p.kind}`}>
               <span className="pulse__tag">{p.label}</span>
             </span>
           ))}
         </div>
-        <AgentCard role="provider" agent={provider} active={active} fallback="analyst" />
+        <AgentCard role="provider" agent={provider} busy={providerBusy} phase={phase} fallback="analyst" />
       </div>
       <StatStrip stats={stats} />
     </section>
@@ -271,21 +365,39 @@ function FlowPanel({
 function AgentCard({
   role,
   agent,
-  active,
+  busy,
+  phase,
   fallback,
 }: {
   role: 'client' | 'provider';
   agent?: AgentNode;
-  active: boolean;
+  busy: boolean;
+  phase: Phase;
   fallback: string;
 }) {
   const name = agent?.nametag ?? `@${fallback}-…`;
+  const liveStatus =
+    role === 'provider' && phase.kind === 'analyze'
+      ? 'analyzing…'
+      : role === 'provider' && phase.kind === 'quote'
+        ? 'quoting…'
+        : role === 'provider' && phase.kind === 'deliver'
+          ? 'delivering…'
+          : role === 'client' && phase.kind === 'hire'
+            ? 'hiring…'
+            : role === 'client' && phase.kind === 'pay'
+              ? 'paying…'
+              : null;
+  const meta = liveStatus ?? agent?.detail ?? (agent ? 'online' : 'waiting…');
   return (
-    <div className={`node node--${role}${agent && active ? ' node--active' : ''}`}>
+    <div className={`node node--${role}${busy ? ' node--active node--busy' : ''}`}>
       <div className="node__role">{role}</div>
-      <div className="node__avatar">{initials(name)}</div>
+      <div className="node__avatar">
+        {initials(name)}
+        {busy && <span className="node__ring" />}
+      </div>
       <div className="node__name">{name}</div>
-      <div className="node__meta">{agent?.detail ?? (agent ? 'online' : 'waiting…')}</div>
+      <div className={`node__meta${liveStatus ? ' node__meta--live' : ''}`}>{meta}</div>
     </div>
   );
 }
