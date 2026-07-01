@@ -83,13 +83,13 @@ async function analyze(ref: RepoRef, token?: string) {
     else if (stale > 180) add('stale-6m', `no pushes in ${stale} days`, 10);
   }
   const license = m.license?.spdx_id && m.license.spdx_id !== 'NOASSERTION' ? m.license.spdx_id : null;
-  if (!license) add('no-license', 'no detected license (legal/usage risk)', 10);
+  if (!license) add('no-license', 'no license detected by GitHub (usage ambiguity)', 8);
   const age = daysSince(m.created_at ?? null, now);
-  if (age != null && age < 90) add('very-new', `created ${age} days ago (limited track record)`, 12);
-  if ((m.stargazers_count ?? 0) < 5) add('low-adoption', `only ${m.stargazers_count ?? 0} stars`, 8);
-  if ((m.open_issues_count ?? 0) > 500) add('issue-backlog', `${m.open_issues_count} open issues`, 8);
+  if (age != null && age < 90) add('very-new', `created ${age} days ago (limited track record)`, 10);
+  if ((m.stargazers_count ?? 0) < 5) add('low-adoption', `only ${m.stargazers_count ?? 0} stars`, 6);
+  // open-issue count intentionally NOT scored (includes PRs; popular repos carry thousands).
 
-  // OSV.dev dependency-CVE scan (npm manifest, best-effort)
+  // OSV.dev CVE scan — production dependencies only, severity-weighted.
   try {
     const pkgRes = await fetch(
       `https://api.github.com/repos/${ref.owner}/${ref.repo}/contents/package.json`,
@@ -98,11 +98,9 @@ async function analyze(ref: RepoRef, token?: string) {
     if (pkgRes.ok) {
       const pkg = JSON.parse(await pkgRes.text()) as Record<string, any>;
       const deps: { name: string; version: string }[] = [];
-      for (const field of ['dependencies', 'devDependencies']) {
-        for (const [name, range] of Object.entries(pkg[field] ?? {})) {
-          const v = String(range).match(/\d+\.\d+\.\d+/)?.[0];
-          if (v) deps.push({ name, version: v });
-        }
+      for (const [name, range] of Object.entries(pkg.dependencies ?? {})) {
+        const v = String(range).match(/\d+\.\d+\.\d+/)?.[0];
+        if (v) deps.push({ name, version: v });
       }
       if (deps.length) {
         const osvRes = await fetch('https://api.osv.dev/v1/querybatch', {
@@ -114,20 +112,53 @@ async function analyze(ref: RepoRef, token?: string) {
         });
         if (osvRes.ok) {
           const data = (await osvRes.json()) as { results?: { vulns?: { id: string }[] }[] };
-          let vuln = 0;
-          const ids: string[] = [];
-          for (const r of data.results ?? []) {
-            if (r.vulns?.length) {
-              vuln++;
-              for (const v of r.vulns) if (ids.length < 3) ids.push(v.id);
+          const ORDER = ['critical', 'high', 'moderate', 'low', 'unknown'];
+          const counts: Record<string, number> = { critical: 0, high: 0, moderate: 0, low: 0, unknown: 0 };
+          const cache = new Map<string, string>();
+          let vulnDeps = 0;
+          let lookups = 0;
+          const fetchSev = async (id: string): Promise<string> => {
+            try {
+              const r = await fetch(`https://api.osv.dev/v1/vulns/${id}`);
+              if (!r.ok) return 'unknown';
+              const v = (await r.json()) as { database_specific?: { severity?: string }; severity?: { type?: string; score?: string }[] };
+              const ds = v.database_specific?.severity?.toLowerCase();
+              if (ds && ['critical', 'high', 'moderate', 'low'].includes(ds)) return ds;
+              const cvss = Number(v.severity?.find((s) => s.type?.toUpperCase().startsWith('CVSS'))?.score);
+              if (!Number.isNaN(cvss)) return cvss >= 9 ? 'critical' : cvss >= 7 ? 'high' : cvss >= 4 ? 'moderate' : 'low';
+              return 'unknown';
+            } catch {
+              return 'unknown';
             }
+          };
+          for (const r of data.results ?? []) {
+            if (!r.vulns?.length) continue;
+            vulnDeps++;
+            let depSev = 'unknown';
+            for (const vln of r.vulns) {
+              let sev = 'unknown';
+              if (cache.has(vln.id)) sev = cache.get(vln.id)!;
+              else if (lookups < 30) {
+                sev = await fetchSev(vln.id);
+                cache.set(vln.id, sev);
+                lookups++;
+              }
+              if (ORDER.indexOf(sev) < ORDER.indexOf(depSev)) depSev = sev;
+            }
+            counts[depSev] = (counts[depSev] ?? 0) + 1;
           }
-          if (vuln > 0) {
-            add(
-              'dependency-cves',
-              `${vuln} of ${deps.length} dependencies have known advisories${ids.length ? ` (e.g. ${ids.join(', ')})` : ''}`,
-              Math.min(34, vuln * 4),
-            );
+          const weight = Math.min(
+            40,
+            (counts.critical ?? 0) * 10 +
+              (counts.high ?? 0) * 6 +
+              (counts.moderate ?? 0) * 3 +
+              (counts.low ?? 0) * 1 +
+              (counts.unknown ?? 0) * 2,
+          );
+          if (weight > 0) {
+            const parts: string[] = [];
+            for (const k of ['critical', 'high', 'moderate', 'low']) if (counts[k]) parts.push(`${counts[k] ?? 0} ${k}`);
+            add('dependency-cves', `${vulnDeps} of ${deps.length} production dependencies have known advisories${parts.length ? ` (${parts.join(', ')})` : ''}`, weight);
           }
         }
       }

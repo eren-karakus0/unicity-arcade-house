@@ -89,18 +89,22 @@ describe('osv manifest parsing', () => {
     expect(cleanVersion('*')).toBeNull();
   });
 
-  it('extracts dependencies and devDependencies', () => {
+  it('extracts production dependencies only by default (dev deps do not ship)', () => {
     const pkg = JSON.stringify({
       name: 'demo',
       dependencies: { react: '^18.3.1', lodash: '4.17.20' },
       devDependencies: { vite: '^5.4.0' },
     });
-    const deps = parseNpmManifest(pkg);
-    const names = deps.map((d) => d.name);
+    const names = parseNpmManifest(pkg).map((d) => d.name);
     expect(names).toContain('react');
     expect(names).toContain('lodash');
-    expect(names).toContain('vite');
-    expect(deps.find((d) => d.name === 'lodash')?.version).toBe('4.17.20');
+    expect(names).not.toContain('vite'); // devDependency excluded
+    expect(parseNpmManifest(pkg).find((d) => d.name === 'lodash')?.version).toBe('4.17.20');
+  });
+
+  it('includes devDependencies when asked', () => {
+    const pkg = JSON.stringify({ dependencies: { react: '^18' }, devDependencies: { vite: '^5.4.0' } });
+    expect(parseNpmManifest(pkg, { includeDev: true }).map((d) => d.name)).toContain('vite');
   });
 
   it('returns an empty list for invalid json', () => {

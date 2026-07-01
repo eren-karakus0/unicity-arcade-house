@@ -39,14 +39,15 @@ export function scoreRepo(meta: RepoMeta, now: number = Date.now()): ScoreResult
     else if (stale > 180) add('stale-6m', `no pushes in ${stale} days`, 10);
   }
 
-  if (!meta.license) add('no-license', 'no detected license (legal/usage risk)', 10);
+  if (!meta.license) add('no-license', 'no license detected by GitHub (usage ambiguity)', 8);
 
   const age = daysSince(meta.createdAt, now);
-  if (age != null && age < 90) add('very-new', `created ${age} days ago (limited track record)`, 12);
+  if (age != null && age < 90) add('very-new', `created ${age} days ago (limited track record)`, 10);
 
-  if (meta.stars < 5) add('low-adoption', `only ${meta.stars} stars`, 8);
+  if (meta.stars < 5) add('low-adoption', `only ${meta.stars} stars`, 6);
 
-  if (meta.openIssues > 500) add('issue-backlog', `${meta.openIssues} open issues`, 8);
+  // NOTE: open-issue count is intentionally NOT scored — GitHub's open_issues_count
+  // includes open PRs, and popular, healthy repos naturally carry thousands.
 
   const score = Math.min(100, signals.reduce((s, x) => s + x.weight, 0));
   return { score, band: bandFor(score), signals };

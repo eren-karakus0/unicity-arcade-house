@@ -24,15 +24,20 @@ export async function analyzeRepo(repoUrl: string, opts: AnalyzeOptions = {}): P
   const base = scoreRepo(meta);
   const signals: RiskSignal[] = [...base.signals];
 
-  // Real dependency-vulnerability scan via OSV.dev (free, best-effort).
+  // Real production-dependency CVE scan via OSV.dev (free, severity-weighted).
   try {
     const osv = await scanDependencies(ref, opts.githubToken);
-    if (osv && osv.vulnerableCount > 0) {
-      const sample = osv.sampleIds.slice(0, 3).join(', ');
+    if (osv && osv.weight > 0) {
+      const parts: string[] = [];
+      if (osv.counts.critical) parts.push(`${osv.counts.critical} critical`);
+      if (osv.counts.high) parts.push(`${osv.counts.high} high`);
+      if (osv.counts.moderate) parts.push(`${osv.counts.moderate} moderate`);
+      if (osv.counts.low) parts.push(`${osv.counts.low} low`);
+      const sev = parts.length ? ` (${parts.join(', ')})` : '';
       signals.push({
         name: 'dependency-cves',
-        detail: `${osv.vulnerableCount} of ${osv.totalQueried} dependencies have known advisories${sample ? ` (e.g. ${sample})` : ''}`,
-        weight: Math.min(34, osv.vulnerableCount * 4),
+        detail: `${osv.vulnerableDeps} of ${osv.prodDeps} production dependencies have known advisories${sev}`,
+        weight: osv.weight,
       });
     }
   } catch {
