@@ -1,0 +1,20 @@
+{
+  "name": "@bazaar/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Persistent agent-economy backend — a live analyst + scout on testnet2, exposed over HTTP/SSE for the dashboard.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bazaar/core": "workspace:*",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

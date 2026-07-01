@@ -17,6 +17,7 @@
     "smoke": "pnpm --filter @bazaar/core smoke",
     "analyst": "pnpm --filter @bazaar/analyst-agent start",
     "alphascout": "pnpm --filter @bazaar/alphascout-agent start",
+    "backend": "pnpm --filter @bazaar/backend start",
     "dashboard:build": "pnpm --filter @bazaar/dashboard build",
     "dashboard": "pnpm --filter @bazaar/dashboard run server",
     "dashboard:dev": "pnpm --filter @bazaar/dashboard run dev"
