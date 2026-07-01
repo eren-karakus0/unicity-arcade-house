@@ -16,6 +16,17 @@ export interface GameMeta {
   inputKind: 'choice' | 'seed';
 }
 
+export interface DailyView {
+  goal: number;
+  wins: number;
+  claimed: boolean;
+}
+export interface PlayerSnapshot {
+  streak: number;
+  best: number;
+  daily: DailyView;
+}
+
 export interface NewRound {
   game: string;
   roundId: string;
@@ -23,6 +34,7 @@ export interface NewRound {
   rewardUct: number;
   house: string;
   publicState?: Record<string, unknown>;
+  you?: PlayerSnapshot;
 }
 
 export interface PlayResult {
@@ -39,6 +51,11 @@ export interface PlayResult {
   txId?: string;
   txRef?: string;
   delivery?: string;
+  streak: number;
+  best: number;
+  streakBonus: number;
+  dailyBonus: number;
+  daily: DailyView;
 }
 
 export interface LeaderRow {
@@ -56,6 +73,7 @@ export interface Leaderboard {
   baseRewardUct: number;
   games: GameMeta[];
   rows: LeaderRow[];
+  daily?: { goal: number; reward: number } | null;
 }
 
 export { hasBackend };

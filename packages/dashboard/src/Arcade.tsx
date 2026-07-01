@@ -11,10 +11,11 @@ import {
   type GameMeta,
   type LeaderRow,
   type NewRound,
+  type PlayerSnapshot,
   type PlayResult,
 } from './lib/arcade';
 import { GAME_UI, GAMES_META } from './arcade/games-ui';
-import { BotMark } from './arcade/art';
+import { BotMark, Flame } from './arcade/art';
 
 interface IdLike {
   nametag?: string;
@@ -44,6 +45,8 @@ export function Arcade() {
   const [games, setGames] = useState<GameMeta[]>(GAMES_META);
   const [house, setHouse] = useState<string | null>(null);
   const [baseReward, setBaseReward] = useState(1);
+  const [you, setYou] = useState<PlayerSnapshot | null>(null);
+  const [dailyDef, setDailyDef] = useState<{ goal: number; reward: number } | null>(null);
   const dealing = useRef(false);
 
   const meta = games.find((g) => g.id === selected) ?? GAMES_META.find((g) => g.id === selected)!;
@@ -54,6 +57,7 @@ export function Arcade() {
     if (b.house) setHouse(b.house);
     if (b.baseRewardUct) setBaseReward(b.baseRewardUct);
     if (b.games?.length) setGames(b.games);
+    if (b.daily) setDailyDef(b.daily);
   }, []);
 
   const refreshBoard = useCallback(() => {
@@ -98,6 +102,7 @@ export function Arcade() {
         const r = await newRound(gameId, addressOf(wallet.identity));
         setRound(r);
         setHouse(r.house);
+        if (r.you) setYou(r.you);
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Could not start a round.';
         if (/timed out|waking up|failed to fetch|load failed/i.test(msg)) setReady(false);
@@ -137,6 +142,7 @@ export function Arcade() {
       });
       setRound(null);
       setResult(res);
+      setYou({ streak: res.streak, best: res.best, daily: res.daily });
       setVerified(null);
       void (async () => {
         let ok = await verifyCommit(res.secret, res.nonce, res.commit);
@@ -193,6 +199,8 @@ export function Arcade() {
   return (
     <section className="arcade">
       <Hero house={house} />
+
+      <EventsBar you={you} dailyDef={dailyDef} />
 
       <div className="picker">
         {games
@@ -294,6 +302,14 @@ export function Arcade() {
                 <span className="pay">the house took this one</span>
               )}
             </div>
+            {outcome === 'win' && (result.streakBonus > 0 || result.dailyBonus > 0) && (
+              <div className="bonusline">
+                includes
+                {result.streakBonus > 0 ? ` streak bonus +${result.streakBonus}` : ''}
+                {result.streakBonus > 0 && result.dailyBonus > 0 ? ' ·' : ''}
+                {result.dailyBonus > 0 ? ` daily bonus +${result.dailyBonus}` : ''} UCT
+              </div>
+            )}
             {outcome === 'win' && result.paid && result.txId && (
               <TxProof id={result.txId} delivery={result.delivery} />
             )}
@@ -357,6 +373,40 @@ function Hero({ house }: { house: string | null }) {
           provably fair
         </span>
         <span className="arcade__chip">on-chain payouts</span>
+      </div>
+    </div>
+  );
+}
+
+function EventsBar({
+  you,
+  dailyDef,
+}: {
+  you: PlayerSnapshot | null;
+  dailyDef: { goal: number; reward: number } | null;
+}) {
+  const streak = you?.streak ?? 0;
+  const goal = you?.daily.goal ?? dailyDef?.goal ?? 5;
+  const wins = you?.daily.wins ?? 0;
+  const claimed = you?.daily.claimed ?? false;
+  const reward = dailyDef?.reward ?? 10;
+  const pct = claimed ? 100 : Math.min(100, Math.round((wins / goal) * 100));
+  return (
+    <div className="events">
+      <div className="events__streak">
+        <Flame size={22} dim={streak === 0} />
+        <span className="events__streak-n">{streak > 0 ? `${streak} win streak` : 'no streak yet'}</span>
+        {!!you && you.best > 0 && <span className="events__best">best {you.best}</span>}
+      </div>
+      <div className="events__daily">
+        <div className="events__daily-top">
+          <span>Daily challenge · win {goal}</span>
+          <span className="events__daily-reward">{claimed ? '✓ claimed' : `+${reward} UCT`}</span>
+        </div>
+        <div className="events__bar">
+          <div className="events__fill" style={{ width: `${pct}%` }} />
+        </div>
+        <div className="events__daily-sub">{claimed ? 'done for today' : `${wins} / ${goal} wins today`}</div>
       </div>
     </div>
   );

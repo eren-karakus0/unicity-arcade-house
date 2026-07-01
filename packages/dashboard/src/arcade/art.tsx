@@ -181,6 +181,18 @@ export function HandScissors({ size = 64 }: { size?: number }) {
   );
 }
 
+export function Flame({ size = 20, dim = false }: { size?: number; dim?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" role="img" aria-label="streak">
+      <path
+        d="M12 2 C 12 6, 7 8, 7 14 a5 5 0 0 0 10 0 c 0 -3 -2 -4 -2 -6 c -2 2 -3 1 -3 -6 Z"
+        fill={dim ? '#3a3a3a' : O}
+      />
+      <path d="M12 11 c 0 3 -2 3 -2 5 a2 2 0 0 0 4 0 c 0 -2 -2 -2 -2 -5 Z" fill={dim ? '#555' : '#FFD9A8'} />
+    </svg>
+  );
+}
+
 export function HandOf({ move, size = 64 }: { move?: string; size?: number }) {
   if (move === 'rock') return <HandRock size={size} />;
   if (move === 'paper') return <HandPaper size={size} />;

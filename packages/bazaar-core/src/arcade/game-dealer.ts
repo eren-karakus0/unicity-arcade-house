@@ -2,6 +2,17 @@ import type { SphereAgent } from '../sphere-agent.js';
 import { createLogger, type Logger } from '../logger.js';
 import { commitHash, makeNonce } from './rng.js';
 import { GAMES, type Outcome } from './games/index.js';
+import {
+  applyLoss,
+  applyWin,
+  dailyView,
+  newPlayerState,
+  todayKey,
+  DAILY_GOAL,
+  DAILY_REWARD,
+  type DailyView,
+  type PlayerState,
+} from './events-logic.js';
 
 export interface GameDealerOptions {
   /** The house wallet — pays winners and holds the prize treasury. */
@@ -28,6 +39,12 @@ interface Round {
   createdAt: number;
 }
 
+export interface PlayerSnapshot {
+  streak: number;
+  best: number;
+  daily: DailyView;
+}
+
 export interface NewRound {
   game: string;
   roundId: string;
@@ -35,6 +52,7 @@ export interface NewRound {
   rewardUct: number;
   house: string;
   publicState?: Record<string, unknown>;
+  you?: PlayerSnapshot;
 }
 
 export interface PlayResult {
@@ -51,6 +69,12 @@ export interface PlayResult {
   txId?: string;
   txRef?: string;
   delivery?: string;
+  /** Engagement layer. */
+  streak: number;
+  best: number;
+  streakBonus: number;
+  dailyBonus: number;
+  daily: DailyView;
 }
 
 export interface LeaderRow {
@@ -88,6 +112,7 @@ export class GameDealer {
   private readonly rounds = new Map<string, Round>();
   private readonly lastPlay = new Map<string, number>();
   private readonly board = new Map<string, LeaderRow>();
+  private readonly players = new Map<string, PlayerState>();
   private payLock: Promise<void> = Promise.resolve();
 
   constructor(opts: GameDealerOptions) {
@@ -128,6 +153,7 @@ export class GameDealer {
     const commit = commitHash(secret, nonce);
     const roundId = `${gameId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.rounds.set(roundId, { gameId, secret, nonce, commit, publicState, createdAt: Date.now() });
+    const state = this.players.get(this.keyFor(playerAddress)) ?? newPlayerState();
     return {
       game: gameId,
       roundId,
@@ -135,7 +161,13 @@ export class GameDealer {
       rewardUct: this.baseReward * game.rewardMult,
       house: this.house,
       ...(publicState ? { publicState } : {}),
+      you: { streak: state.streak, best: state.best, daily: dailyView(state, todayKey()) },
     };
+  }
+
+  /** The daily-challenge definition, for the game hall to display. */
+  dailyInfo(): { goal: number; reward: number } {
+    return { goal: DAILY_GOAL, reward: DAILY_REWARD };
   }
 
   /** Reveal, judge, and (on a win) pay the player on-chain. */
@@ -153,9 +185,25 @@ export class GameDealer {
     this.rounds.delete(input.roundId); // one-shot: a commitment is spent once
 
     const judged = game.judge(round.secret, resolved, round.publicState);
-    const reward = this.baseReward * judged.rewardMult;
     const name = (input.name || input.playerAddress || 'anon').replace(/^@/, '').slice(0, 24);
     if (input.playerAddress) this.lastPlay.set(input.playerAddress, Date.now());
+
+    // Engagement layer: streaks + daily challenge.
+    const key = this.keyFor(input.playerAddress);
+    let state = this.players.get(key) ?? newPlayerState();
+    let streakBonus = 0;
+    let dailyBonus = 0;
+    if (judged.outcome === 'win') {
+      const upd = applyWin(state, todayKey());
+      state = upd.state;
+      streakBonus = upd.streakBonus;
+      dailyBonus = upd.dailyBonus;
+    } else if (judged.outcome === 'lose') {
+      state = applyLoss(state);
+    }
+    this.players.set(key, state);
+
+    const reward = this.baseReward * judged.rewardMult + streakBonus + dailyBonus;
 
     let paid = false;
     let payoutError: string | undefined;
@@ -185,7 +233,16 @@ export class GameDealer {
       ...(tx?.id ? { txId: tx.id } : {}),
       ...(tx?.tokenTransfers?.[0]?.requestIdHex ? { txRef: tx.tokenTransfers[0].requestIdHex } : {}),
       ...(tx?.deliveryState ? { delivery: tx.deliveryState } : {}),
+      streak: state.streak,
+      best: state.best,
+      streakBonus,
+      dailyBonus,
+      daily: dailyView(state, todayKey()),
     };
+  }
+
+  private keyFor(address?: string): string {
+    return address ?? 'anon';
   }
 
   leaderboard(limit = 10): LeaderRow[] {
