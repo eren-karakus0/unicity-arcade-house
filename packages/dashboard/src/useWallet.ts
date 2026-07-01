@@ -16,9 +16,9 @@ const SESSION_KEY = 'sphere-connect-session';
 const IDENTITY_KEY = 'sphere-connect-identity';
 
 const DAPP = {
-  name: 'Sphere Agent Bazaar',
-  description: 'Autonomous agent marketplace — repo-risk analysis on Unicity',
-  url: typeof location !== 'undefined' ? location.origin : 'https://sphere-agent-bazaar-dashboard.vercel.app',
+  name: 'Unicity Arcade House',
+  description: 'Provably-fair games vs an autonomous house — win real testnet UCT on-chain',
+  url: typeof location !== 'undefined' ? location.origin : 'https://unicity-arcade-house.vercel.app',
   icon: '/icon.svg',
 };
 

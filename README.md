@@ -1,15 +1,15 @@
-# Sphere Agent Bazaar
+# Unicity Arcade House
 
-> An on-network **agent service marketplace** on Unicity — autonomous AI agents
-> that discover, hire, and pay each other peer-to-peer, with no human in the
-> loop for each transaction.
+> A hall of **provably-fair games** played against an **autonomous house** on
+> Unicity. Beat the house and it pays you real testnet UCT **on-chain** —
+> automatically, with no human in the loop.
 
 Built on the [Sphere SDK](https://github.com/unicity-sphere/sphere-sdk) for the
 Unicity **"Build the machine economy"** builder campaign.
 
-**Submission track:** Autonomous agents · **Runs on:** Unicity testnet2
+**Track:** Autonomous agents · **Runs on:** Unicity testnet2
 
-**🔴 Live dashboard:** **https://sphere-agent-bazaar-dashboard.vercel.app/**
+**🔴 Live:** **https://sphere-agent-bazaar-dashboard.vercel.app/**
 
 [![CI](https://github.com/eren-karakus0/sphere-agent-bazaar/actions/workflows/ci.yml/badge.svg)](https://github.com/eren-karakus0/sphere-agent-bazaar/actions/workflows/ci.yml)
 
@@ -17,67 +17,66 @@ Unicity **"Build the machine economy"** builder campaign.
 
 ## The idea
 
-The internet is being rebuilt for AI. Billions of agents will need to find each
-other, agree terms, and settle — at machine speed. Sphere Agent Bazaar is a small
-but complete demonstration of exactly that: a **two-sided agent economy** where
+Most "machine economy" demos are impressive but have zero everyday users. The
+Arcade House flips that: a simple, sticky product **anyone** can use — while
+still being a genuine showcase of Unicity's core primitives (identity + payments
++ an autonomous agent).
 
-- a **provider** agent advertises a real service on the network and gets paid for
-  delivering it, and
-- a **client** agent autonomously discovers that service, hires it, pays for it,
-  and consumes the result — driven by its own budget and goals, on a loop.
+You connect your Unicity wallet (that's your login), pick a game, and play
+against **the house — an autonomous Sphere agent**. When you win, the house
+agent sends you real testnet UCT on-chain by itself. No human presses "pay".
 
-The flagship demo is a **crypto repo-risk economy**:
+### Provably fair
+
+Every game commits to its hidden value **before** you act:
 
 ```
-  AlphaScout (client / treasury)                 Repo Risk Analyst (provider)
-  ──────────────────────────────                 ────────────────────────────
-  picks a repo from its watchlist
-        │
-        │  1. market.search("repo risk analysis")  ───────────►  posts a `service`
-        │                                                         intent to the market
-        │  2. DM: job-request { repoUrl }          ───────────►
-        │                                          ◄───────────  3. payment-request (price)
-        │  4. pays the request (UCT)               ───────────►
-        │                                                         5. analyzes the repo
-        │                                                            (GitHub + OSV.dev, free)
-        │  6. DM: job-result { riskReport }        ◄───────────
-        ▼
-  aggregates into a report for the user
+1. deal   →  house picks a secret, sends you sha256(secret : nonce)   (the "commitment")
+2. play   →  you make your choice
+3. reveal →  house reveals secret + nonce; your browser re-hashes it and
+             checks it matches the commitment — so the house could not have
+             changed its move after seeing yours
 ```
 
-Money actually moves between the two agents on every job. No human clicks
-"send" — AlphaScout decides when to act, finds its counterparty through the
-market, and settles programmatically.
+**Dice Duel** goes further with a two-seed RNG: the house commits a server seed,
+your browser contributes a client seed, and both dice derive from the hash of the
+two — so neither side can steer the roll. The browser re-derives it to verify.
 
-## Why it fits the network
+### The games
 
-Depth over breadth — the build uses the Sphere primitives the way they are meant
-to be used, not a wallet bolted onto a chat bot:
+| Game | You do | Win pays |
+|------|--------|----------|
+| **Rock · Paper · Scissors** | beat the sealed move | 1× |
+| **Dice Duel** | higher roll wins (two-seed fair) | 1× |
+| **Coin Flip** | call the sealed coin | 1× |
+| **High · Low** | is the next card higher or lower? | 1× |
+| **Lucky Number** | guess the sealed number 1–6 | **5×** |
+
+On a win the house pays out from its treasury; the UI shows the real on-chain
+transfer id and its delivery state.
+
+## Under the hood
+
+The house is a live **Sphere agent** — the same autonomous-agent infrastructure
+this repo is built on (`@bazaar/core` wraps a single Sphere v2 wallet: identity,
+self-mint, send/receive, on-chain settlement). The backend runs the house agent
+on testnet2 and exposes it to the web app.
 
 | Primitive | Used for |
 |-----------|----------|
-| **nametag** | each agent's on-network identity (`@bzr-analyst`, `@bzr-scout`) |
-| **market (intents)** | the provider advertises; the client discovers via semantic search |
-| **DM (Nostr)** | job negotiation and result delivery |
-| **payment requests** | the provider bills the client for a job |
-| **payments (mint/send/receive)** | treasury funding and settlement |
-| **swap (escrow)** | *(stretch)* trustless report-token ⇄ payment settlement |
+| **nametag** | the house's on-network identity |
+| **payments (mint/send)** | funding the treasury and paying winners on-chain |
+| **wallet connect** | the player's identity / login |
 
 ## Monorepo layout
 
 ```
-sphere-agent-bazaar/
 ├── packages/
-│   ├── bazaar-core/        # shared library: Sphere v2 wiring, marketplace
-│   │                       #   protocol types, pluggable LLM summarizer
-│   ├── analyst-agent/      # provider: Repo Risk Analyst
-│   └── alphascout-agent/   # client: autonomous treasury that hires the analyst
-└── (dashboard/ — live economy visualizer, lands in a later milestone)
+│   ├── bazaar-core/     # Sphere v2 wiring + the arcade game engine
+│   │                    #   (arcade/: provably-fair games + GameDealer)
+│   ├── backend/         # runs the house agent + /api/arcade endpoints
+│   └── dashboard/       # the Arcade House web app (React + Vite)
 ```
-
-`@bazaar/core` wraps a single Sphere wallet (`SphereAgent`) and does the two-step
-v2 provider wiring — base providers **plus** the wallet-api rails, the step that
-silently disables transfers if skipped.
 
 ## Getting started
 
@@ -85,80 +84,20 @@ Requirements: Node ≥ 20, pnpm ≥ 10.
 
 ```bash
 pnpm install
-cp .env.example .env        # the testnet2 key is public; mnemonics auto-generate
+pnpm -r test          # run the game-logic unit tests
+pnpm backend          # run the house backend (needs testnet mnemonics in .env)
+pnpm dashboard:dev    # run the web app against it
 ```
 
-### Verify the wiring (end-to-end)
-
-The smoke test stands up two agents, self-mints UCT on one, and transfers value
-to the other — proving the full testnet2 path works on your machine:
-
-```bash
-pnpm smoke
-```
-
-Expected tail:
-
-```
-[smoke] analyst balance after mint: 10 UCT
-[smoke] transfer ... status=completed
-[smoke] scout   balance: 3 UCT
-[smoke] ✅ E2E TRANSFER SUCCESS — v2 wiring confirmed.
-```
-
-### Run the agents
-
-```bash
-pnpm analyst       # start the provider (Repo Risk Analyst), runs as a service
-pnpm alphascout    # start the client (AlphaScout), discovers + hires + pays
-```
-
-### Watch it live (control-room dashboard)
-
-A dark, Unicity-branded dashboard streams the economy in real time — agent flow
-with value pulses, a job board with the risk-score pipeline, and a live event feed.
-
-```bash
-pnpm dashboard:build   # build the static UI (once)
-pnpm dashboard         # serve it + the live SSE feed on http://localhost:4317
-# then, in another terminal, run the agents — the dashboard updates live
-```
-
-For UI development with hot reload: `pnpm dashboard` (server, :4317) +
-`pnpm dashboard:dev` (Vite, :5173), then open :5173.
+Set `VITE_BACKEND_URL` for the web app to reach a deployed backend.
 
 ## Configuration
 
-All config lives in `.env` (see `.env.example`). Notable values:
+All config lives in `.env`. Notable values:
 
 - `SPHERE_ORACLE_API_KEY` — the **public** testnet2 gateway key (not a secret).
-- `ANALYST_MNEMONIC` / `ALPHASCOUT_MNEMONIC` — leave empty to auto-generate;
-  paste back to keep stable identities. **Never commit a real mnemonic.**
-- `GEMINI_API_KEY` — *optional*; the report summarizer falls back to a
-  deterministic template when absent, so the agents run with zero external cost.
-
-## Status
-
-- [x] **M1 — foundation:** monorepo, `SphereAgent` v2 wiring, identities, self-mint,
-      end-to-end transfer verified on testnet2.
-- [x] **M2 — economy:** provider service loop (SSRF-guarded GitHub risk scoring),
-      market `service` intents, semantic discovery, DM job protocol, payment-request
-      settlement, and AlphaScout's autonomous hire loop with hard treasury caps.
-      **Verified live on testnet2:** AlphaScout discovers `@analyst-knkchn` on the
-      market, hires it for two repos, pays the bills itself, and receives the
-      reports — money moving between two agents with no human in the loop.
-- [x] **M3 — control room:** a live, Unicity-branded dashboard (`packages/dashboard`)
-      that streams the economy over SSE — agent flow with value pulses, a job board
-      with the risk pipeline, and a live event feed. Agents emit structured events
-      to a shared log; the dashboard server tails and broadcasts them.
-- [x] **M3.1 — shipped:** dashboard deployed publicly at
-      [sphere-agent-bazaar-dashboard.vercel.app](https://sphere-agent-bazaar-dashboard.vercel.app/)
-      (replays a real testnet2 run).
-- [x] **M3.2 — real CVE scanning:** the analyst reads a repo's npm manifest and
-      scans its dependencies against **OSV.dev** (free, no key), folding known
-      advisories into the score (e.g. `angular.js` → 94/100 critical, 12 vulnerable deps).
-- [ ] **Next:** list on `sphere-apps`, submit on the developer portal.
-- [ ] **M4 — stretch:** escrow-swap settlement, AstridOS runtime, Gemini summaries.
+- `ALPHASCOUT_MNEMONIC` — the house wallet. Leave empty to auto-generate; paste
+  back to keep a stable identity. **Never commit a real mnemonic.**
 
 ## License
 
