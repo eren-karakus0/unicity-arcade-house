@@ -32,15 +32,19 @@ export function App() {
       <Header mode={mode} />
       <Hero />
       <HowItWorks />
-      <TryIt />
-      <div className="section-label">Behind the scenes · the autonomous economy</div>
-      <ModeBanner mode={mode} />
-      <StatBar stats={stats} />
+      <div className="split">
+        <TryIt />
+        <FlowPanel
+          client={client}
+          provider={provider}
+          events={events}
+          stats={stats}
+          mode={mode}
+        />
+      </div>
+      <div className="section-label">Live jobs &amp; activity</div>
       <div className="grid">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <FlowPanel client={client} provider={provider} events={events} />
-          <JobBoard jobs={jobs} />
-        </div>
+        <JobBoard jobs={jobs} />
         <Ticker events={events} />
       </div>
       <Footer count={events.length} />
@@ -85,26 +89,6 @@ function HowItWorks() {
       ))}
     </section>
   );
-}
-
-function ModeBanner({ mode }: { mode: FeedMode }) {
-  if (mode === 'replay') {
-    return (
-      <div className="banner banner--replay">
-        <strong>▷ Replay</strong> — a recorded run on Unicity testnet2. The live agents are
-        offline right now; when they're up, analyzing a repo above drives the economy live.
-      </div>
-    );
-  }
-  if (mode === 'live') {
-    return (
-      <div className="banner banner--live">
-        <strong>● Live</strong> — the agents are connected to Unicity testnet2. Analyze a repo
-        above to trigger a real on-chain job and watch it flow through here.
-      </div>
-    );
-  }
-  return <div className="banner">… connecting to the live feed</div>;
 }
 
 const BANDS: { k: string; label: string }[] = [
@@ -156,26 +140,40 @@ function Header({ mode }: { mode: FeedMode }) {
   );
 }
 
-/* ---------------- Stat bar ---------------- */
-function StatBar({ stats }: { stats: ReturnType<typeof deriveStats> }) {
+/* ---------------- Compact stats + live tag ---------------- */
+function StatStrip({ stats }: { stats: ReturnType<typeof deriveStats> }) {
   const items = [
-    { label: 'Jobs', value: stats.jobs, accent: false },
-    { label: 'Delivered', value: stats.delivered, accent: false },
-    { label: 'UCT moved', value: stats.uctMoved, accent: true, unit: 'UCT' },
-    { label: 'Agents online', value: stats.agents, accent: false },
+    { label: 'jobs', value: String(stats.jobs) },
+    { label: 'delivered', value: String(stats.delivered) },
+    { label: 'UCT moved', value: String(stats.uctMoved), accent: true },
+    { label: 'agents', value: String(stats.agents) },
   ];
   return (
-    <div className="stats">
+    <div className="statstrip">
       {items.map((it) => (
-        <div className="stat" key={it.label}>
-          <div className="stat__label">{it.label}</div>
-          <div className="stat__value">
-            {it.accent ? <em>{it.value}</em> : it.value}
-            {it.unit && <span className="stat__unit">{it.unit}</span>}
-          </div>
+        <div className="statcell" key={it.label}>
+          <span className={`statcell__v${it.accent ? ' statcell__v--accent' : ''}`}>{it.value}</span>
+          <span className="statcell__l">{it.label}</span>
         </div>
       ))}
     </div>
+  );
+}
+
+function LiveTag({ mode }: { mode: FeedMode }) {
+  const label = mode === 'live' ? 'Live' : mode === 'replay' ? 'Replay' : 'Connecting';
+  const cls = mode === 'live' ? 'livetag--on' : mode === 'replay' ? 'livetag--replay' : 'livetag--off';
+  const title =
+    mode === 'live'
+      ? 'Agents connected to Unicity testnet2'
+      : mode === 'replay'
+        ? 'Recorded run — the live agents are offline'
+        : 'connecting…';
+  return (
+    <span className={`livetag ${cls}`} title={title}>
+      <span className="livetag__dot" />
+      {label}
+    </span>
   );
 }
 
@@ -189,10 +187,14 @@ function FlowPanel({
   client,
   provider,
   events,
+  stats,
+  mode,
 }: {
   client?: AgentNode;
   provider?: AgentNode;
   events: BazaarEvent[];
+  stats: ReturnType<typeof deriveStats>;
+  mode: FeedMode;
 }) {
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const lastLen = useRef(0);
@@ -216,10 +218,10 @@ function FlowPanel({
   const active = pulses.length > 0;
 
   return (
-    <section className="panel">
+    <section className="panel flowpanel">
       <div className="panel__head">
         <span className="panel__title">Economy Flow</span>
-        <span className="panel__count">UCT ⇄ reports</span>
+        <LiveTag mode={mode} />
       </div>
       <p className="panel__sub">
         Value moving between two autonomous agents — an <span className="ink-accent">orange</span> pulse
@@ -228,7 +230,6 @@ function FlowPanel({
       <div className="flow">
         <AgentCard role="client" agent={client} active={active} fallback="alphascout" />
         <div className="wire">
-          <span className="wire__label">UCT ⇄ reports</span>
           {pulses.map((p) => (
             <span key={p.id} className={`pulse pulse--${p.kind}`}>
               <span className="pulse__tag">{p.label}</span>
@@ -237,6 +238,7 @@ function FlowPanel({
         </div>
         <AgentCard role="provider" agent={provider} active={active} fallback="analyst" />
       </div>
+      <StatStrip stats={stats} />
     </section>
   );
 }

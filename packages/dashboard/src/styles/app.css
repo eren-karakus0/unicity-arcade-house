@@ -347,6 +347,104 @@
   margin-left: 6px;
 }
 
+/* ---------------- Split: analyze | economy flow ---------------- */
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 26px;
+  align-items: stretch;
+}
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+.split > .tryit {
+  margin-top: 0;
+}
+.flowpanel {
+  display: flex;
+  flex-direction: column;
+}
+.flowpanel .flow {
+  flex: 1;
+  min-height: 180px;
+}
+.split .node {
+  width: clamp(120px, 34%, 168px);
+}
+
+/* compact live tag */
+.livetag {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.livetag__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.livetag--on {
+  color: var(--accent);
+  border-color: var(--border-focus);
+}
+.livetag--on .livetag__dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.livetag--replay {
+  color: var(--text-secondary);
+}
+.livetag--replay .livetag__dot {
+  background: var(--accent);
+}
+
+/* compact stat strip inside the flow panel */
+.statstrip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.statcell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  text-align: center;
+}
+.statcell__v {
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.statcell__v--accent {
+  color: var(--accent);
+}
+.statcell__l {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 /* ---------------- Layout grid ---------------- */
 .grid {
   display: grid;

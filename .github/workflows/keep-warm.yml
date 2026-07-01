@@ -1,0 +1,16 @@
+name: keep-warm
+
+# Ping the free Render backend so it doesn't spin down (it sleeps after ~15 min
+# idle). Every ~10 minutes visitors usually hit a warm service with live agents.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend health
+        run: |
+          curl -sS -m 60 https://sphere-agent-bazaar-backend.onrender.com/api/health || true
