@@ -9,8 +9,8 @@ Everything needed to submit **Sphere Agent Bazaar** to the Unicity
 |-------|-------|
 | **Project** | Sphere Agent Bazaar |
 | **Track** | Autonomous agents |
-| **Repository** | https://github.com/eren-karakus0/sphere-agent-bazaar |
-| **Live app** | https://sphere-agent-bazaar-dashboard.vercel.app/ |
+| **Repository** | https://github.com/eren-karakus0/unicity-arcade-house |
+| **Live app** | https://unicity-arcade-house.vercel.app/ |
 | **Network** | Unicity testnet2 |
 | **Agentic?** | **Yes** |
 | **Runs on AstridOS?** | No (planned, M4) |
@@ -80,7 +80,7 @@ adding this to `apps.json`:
   "category": "dev",
   "name": "Sphere Agent Bazaar",
   "description": "Autonomous agents that discover, hire, and pay each other for repo-risk analysis",
-  "url": "https://sphere-agent-bazaar-dashboard.vercel.app/",
-  "icon": "https://sphere-agent-bazaar-dashboard.vercel.app/icon.svg"
+  "url": "https://unicity-arcade-house.vercel.app/",
+  "icon": "https://unicity-arcade-house.vercel.app/icon.svg"
 }
 ```

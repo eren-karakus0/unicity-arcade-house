@@ -9,9 +9,9 @@ Unicity **"Build the machine economy"** builder campaign.
 
 **Track:** Autonomous agents · **Runs on:** Unicity testnet2
 
-**🔴 Live:** **https://sphere-agent-bazaar-dashboard.vercel.app/**
+**🔴 Live:** **https://unicity-arcade-house.vercel.app/**
 
-[![CI](https://github.com/eren-karakus0/sphere-agent-bazaar/actions/workflows/ci.yml/badge.svg)](https://github.com/eren-karakus0/sphere-agent-bazaar/actions/workflows/ci.yml)
+[![CI](https://github.com/eren-karakus0/unicity-arcade-house/actions/workflows/ci.yml/badge.svg)](https://github.com/eren-karakus0/unicity-arcade-house/actions/workflows/ci.yml)
 
 ---
 
