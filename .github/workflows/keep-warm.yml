@@ -1,10 +1,11 @@
 name: keep-warm
 
 # Ping the free Render backend so it doesn't spin down (it sleeps after ~15 min
-# idle). Every ~10 minutes visitors usually hit a warm service with live agents.
+# idle). Scheduled every 5 min because GitHub Actions cron is often delayed
+# 10-15 min under load — the extra attempts keep us inside the idle window.
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:

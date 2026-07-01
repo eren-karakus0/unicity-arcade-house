@@ -9,7 +9,11 @@ services:
     region: frankfurt
     buildCommand: npx --yes pnpm@10.28.1 install --frozen-lockfile
     startCommand: npx --yes pnpm@10.28.1 --filter @bazaar/backend run start
-    healthCheckPath: /api/health
+    # No healthCheckPath on purpose: agent (wallet) startup and on-chain work in
+    # the Sphere SDK briefly block the event loop, so a 5s HTTP health check can
+    # time out and make Render needlessly restart a healthy instance (sometimes
+    # mid-startup). Render still verifies the port is open on deploy; /api/health
+    # remains available for the keep-warm ping and the dashboard's readiness check.
     envVars:
       - key: SPHERE_NETWORK
         value: testnet
