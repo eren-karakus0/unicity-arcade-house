@@ -1129,32 +1129,14 @@
 .gbtn__art { transition: transform 0.16s ease; }
 .gbtn:hover:not(:disabled) .gbtn__art { transform: scale(1.14) rotate(-5deg); }
 
+/* Reduced motion: quiet only the AMBIENT loops (background glow, header
+   scan, ticker). Game reveals are user-initiated actions — in an arcade the
+   motion IS the content, so spins/rolls/flips stay on. */
 @media (prefers-reduced-motion: reduce) {
   .app::after,
-  .anim-pop,
-  .anim-flip,
-  .anim-fist,
-  .anim-tumble,
-  .anim-cointoss,
-  .anim-cardwait,
-  .anim-cycle,
-  .gverdict,
-  .verdict--win,
-  .burst__bit,
-  .burst__coin,
-  .events__flame--lit,
-  .events__flame--hot,
-  .gcard:hover .gcard__art,
-  .wheel--idle,
-  .wheel--spin,
-  .ticker__track,
   .hdr::after,
-  .jpot,
-  .jackpotwin,
-  .plinko__ball--wait {
+  .ticker__track,
+  .jpot {
     animation: none !important;
-  }
-  .wheel--land {
-    transition: none !important;
   }
 }

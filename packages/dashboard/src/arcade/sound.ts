@@ -7,6 +7,9 @@
 
 const MUTE_KEY = 'arcade-muted';
 
+/** Master volume — every per-sound gain is scaled by this. */
+const MASTER = 2.2;
+
 let ctx: AudioContext | null = null;
 let muted = typeof localStorage !== 'undefined' && localStorage.getItem(MUTE_KEY) === '1';
 
@@ -50,7 +53,7 @@ function tone(
   o.type = type;
   o.frequency.setValueAtTime(freq, t0);
   if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t0 + dur);
-  g.gain.setValueAtTime(gain, t0);
+  g.gain.setValueAtTime(Math.min(0.25, gain * MASTER), t0);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
   o.connect(g);
   g.connect(c.destination);
@@ -70,7 +73,7 @@ function noise(dur = 0.06, gain = 0.03, when = 0): void {
   const src = c.createBufferSource();
   src.buffer = buf;
   const g = c.createGain();
-  g.gain.value = gain;
+  g.gain.value = Math.min(0.25, gain * MASTER);
   src.connect(g);
   g.connect(c.destination);
   src.start(t0);
