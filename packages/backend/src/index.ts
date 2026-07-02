@@ -46,22 +46,48 @@ async function boot(): Promise<void> {
   dealer = new GameDealer({ agent: houseAgent, cooldownMs: 800, logger: createLogger('dealer') });
   await dealer.start();
 
-  // Deposits: watch the house wallet for incoming transfers and credit the
-  // sender's in-house balance. receive() also sweeps anything already pending;
-  // the poll makes crediting robust regardless of subscription semantics
-  // (creditDeposit is idempotent per transfer id).
-  const sweepDeposits = () =>
-    houseAgent
-      .receive((t) => {
-        try {
-          dealer?.creditDeposit(t as Parameters<NonNullable<typeof dealer>['creditDeposit']>[0]);
-        } catch (e) {
-          log.warn('deposit credit failed', e instanceof Error ? e.message : e);
-        }
-      })
-      .catch((e: unknown) => log.warn('deposit sweep failed', e instanceof Error ? e.message : e));
-  void sweepDeposits();
-  setInterval(sweepDeposits, 20_000);
+  // Deposits: the wallet-api rails deliver incoming tokens in the background,
+  // and every delivery lands in the wallet history as a RECEIVED entry with
+  // the sender's pubkey/nametag. Sweep that history and credit new entries —
+  // creditDeposit is idempotent per dedupKey. Only entries inside the window
+  // count, so ancient business transfers never become deposits (and a restart
+  // re-credits recent deposits into the fresh in-memory balances).
+  const DEPOSIT_WINDOW_MS = 45 * 60_000;
+  const { coinId: uctCoinId } = houseAgent.uctCoin;
+  const sweepDeposits = () => {
+    try {
+      const entries = houseAgent.getHistory() as {
+        id?: string;
+        dedupKey?: string;
+        type?: string;
+        amount?: string;
+        coinId?: string;
+        symbol?: string;
+        timestamp?: number;
+        senderPubkey?: string;
+        senderNametag?: string;
+        memo?: string;
+      }[];
+      const cutoff = Date.now() - DEPOSIT_WINDOW_MS;
+      for (const e of entries) {
+        if (e.type !== 'RECEIVED') continue;
+        if (e.symbol !== 'UCT' && e.coinId !== uctCoinId) continue;
+        if ((e.timestamp ?? 0) < cutoff) continue;
+        const credited = dealer?.creditDeposit({
+          id: e.dedupKey ?? e.id ?? '',
+          amountBase: e.amount ?? '0',
+          senderPubkey: e.senderPubkey,
+          senderNametag: e.senderNametag,
+          memo: e.memo,
+        });
+        if (credited) log.info(`deposit: +${credited.credited} UCT → ${credited.key.slice(0, 16)}…`);
+      }
+    } catch (e) {
+      log.warn('deposit sweep failed', e instanceof Error ? e.message : e);
+    }
+  };
+  sweepDeposits();
+  setInterval(sweepDeposits, 15_000);
 
   ready = true;
   log.info(`arcade online — house @${houseAgent.nametag}`);

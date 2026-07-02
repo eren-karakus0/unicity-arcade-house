@@ -230,10 +230,10 @@ describe('UCT balance — welcome stake, bets, deposits, withdraw', () => {
     const pubkey = '02abc';
     dealer.newRound('coin', pubkey); // welcome 5
     const transfer = {
-      id: 'tr-1',
+      id: 'RECEIVED_v2_tr-1',
       senderPubkey: pubkey,
       senderNametag: 'p9',
-      tokens: [{ coinId: 'aabb', symbol: 'UCT', amount: '1000' }], // 10.00 with 2 decimals
+      amountBase: '1000', // 10.00 with 2 decimals
     };
     const credited = dealer.creditDeposit(transfer);
     expect(credited?.credited).toBe(10);

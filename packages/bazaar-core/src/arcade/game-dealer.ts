@@ -140,13 +140,19 @@ export interface HouseEvent {
   game?: string;
 }
 
-/** The minimal shape of an incoming wallet transfer we credit as a deposit. */
-export interface DepositTransfer {
+/**
+ * The minimal shape of an incoming transfer we credit as a deposit — matches
+ * the wallet's RECEIVED history entries (the reliable observation point for
+ * wallet-api deliveries).
+ */
+export interface DepositRecord {
+  /** Stable dedup key (the history entry's dedupKey) — crediting is idempotent per id. */
   id: string;
-  senderPubkey: string;
+  /** Amount in the coin's base units, as a positive integer string. */
+  amountBase: string;
+  senderPubkey?: string;
   senderNametag?: string;
   memo?: string;
-  tokens: { coinId: string; symbol: string; amount: string }[];
 }
 
 /** Live transparency stats for the autonomous house (since last restart). */
@@ -397,27 +403,22 @@ export class GameDealer {
   private readonly seenDeposits = new Set<string>();
 
   /**
-   * Credit an incoming wallet transfer to the sender's in-house balance.
+   * Credit an incoming transfer to the sender's in-house balance.
    * Matched by the sender's chain pubkey (the dashboard's canonical player
    * key), falling back to the sender's nametag. Idempotent per transfer id.
    */
-  creditDeposit(t: DepositTransfer): { credited: number; key: string } | null {
+  creditDeposit(t: DepositRecord): { credited: number; key: string } | null {
     if (!t?.id || this.seenDeposits.has(t.id)) return null;
     this.seenDeposits.add(t.id);
     if (this.seenDeposits.size > 2000) {
       const first = this.seenDeposits.values().next().value as string | undefined;
       if (first !== undefined) this.seenDeposits.delete(first);
     }
-    const { coinId } = this.agent.uctCoin;
     let total = 0n;
-    for (const tok of t.tokens ?? []) {
-      if (tok.symbol === 'UCT' || tok.coinId === coinId) {
-        try {
-          total += BigInt(tok.amount || '0');
-        } catch {
-          /* malformed token amount — skip */
-        }
-      }
+    try {
+      total = BigInt(t.amountBase || '0');
+    } catch {
+      return null;
     }
     if (total <= 0n) return null;
     const amount = Math.floor(Number(this.agent.toHuman(total)));
@@ -429,11 +430,12 @@ export class GameDealer {
       t.senderNametag ? `@${t.senderNametag.replace(/^@/, '')}` : undefined,
       t.senderNametag?.replace(/^@/, ''),
     ].filter((c): c is string => !!c);
-    const key = candidates.find((c) => this.players.has(c)) ?? t.senderPubkey;
+    const key = candidates.find((c) => this.players.has(c)) ?? candidates[0];
+    if (!key) return null; // no sender identity at all — nothing to credit
 
     const state = this.players.get(key) ?? newPlayerState();
     this.players.set(key, { ...state, chips: state.chips + amount });
-    const name = (t.senderNametag ?? t.senderPubkey).replace(/^@/, '').slice(0, 24);
+    const name = (t.senderNametag ?? t.senderPubkey ?? key).replace(/^@/, '').slice(0, 24);
     this.pushEvent({ kind: 'deposit', at: Date.now(), amountUct: amount, name });
     this.log.info(`deposit credited: +${amount} UCT from @${name}`);
     return { credited: amount, key };

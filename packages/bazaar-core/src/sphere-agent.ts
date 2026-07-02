@@ -152,6 +152,16 @@ export class SphereAgent {
     return this.sphere.payments.receive(undefined, onTransfer as never);
   }
 
+  /**
+   * The wallet's transaction history (newest first). This is the reliable way
+   * to observe INCOMING transfers: the wallet-api rails deliver tokens in the
+   * background (receive() callbacks never fire for them), but every delivery
+   * lands here as a RECEIVED entry with sender pubkey/nametag + memo.
+   */
+  getHistory(): unknown[] {
+    return this.sphere.payments.getHistory();
+  }
+
   /** Confirmed (spendable) UCT balance, as a human-readable string. */
   async balanceUct(): Promise<string> {
     const uctHex = getCoinIdBySymbol(UCT);
