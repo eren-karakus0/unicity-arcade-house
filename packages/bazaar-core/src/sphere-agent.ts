@@ -116,6 +116,11 @@ export class SphereAgent {
     return this.inner?.identity?.chainPubkey;
   }
 
+  /** UCT coin id (hex) + decimals — e.g. for building wallet send-intents. */
+  get uctCoin(): { coinId: string; decimals: number } {
+    return { coinId: this.uctCoinId, decimals: this.uctDecimals ?? 0 };
+  }
+
   // ---- amount helpers (human UCT string/number <-> smallest-unit) ----
   toSmallest(human: string | number): string {
     return parseTokenAmount(String(human), this.uctDecimals).toString();

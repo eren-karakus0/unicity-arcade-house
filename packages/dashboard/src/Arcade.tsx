@@ -13,6 +13,8 @@ import {
   verifyJackpot,
   verifyPlinko,
   verifyWheel,
+  fetchBalance,
+  type DepositInfo,
   type GameMeta,
   type HouseEvent,
   type HouseStats,
@@ -32,8 +34,10 @@ interface IdLike {
   directAddress?: string;
   chainPubkey?: string;
 }
+// Canonical player key = chain pubkey: it is what incoming wallet transfers
+// carry as the sender, so deposits match the same balance the games use.
 const addressOf = (id: IdLike): string | undefined =>
-  id.directAddress ?? id.chainPubkey ?? (id.nametag ? `@${id.nametag}` : undefined);
+  id.chainPubkey ?? id.directAddress ?? (id.nametag ? `@${id.nametag}` : undefined);
 const nameOf = (id: IdLike): string => {
   if (id.nametag) return id.nametag.replace(/^@/, '');
   if (id.directAddress) return `${id.directAddress.slice(0, 10)}…`;
@@ -62,8 +66,17 @@ export function Arcade() {
   const [stl, setStl] = useState<RoundSettlement | null>(null);
   // Chips staked per round.
   const [bet, setBet] = useState(1);
-  // In-flight cash-out (chips → on-chain UCT), polled until it lands.
+  // In-flight withdraw (balance → on-chain UCT), polled until it lands.
   const [cash, setCash] = useState<{ id: string; amount: number; status: 'pending' | 'landed' | 'failed'; txId?: string } | null>(null);
+  // Wallet deposit (real UCT via the wallet's send-intent approval UI).
+  const [depInfo, setDepInfo] = useState<DepositInfo | null>(null);
+  const [depOpen, setDepOpen] = useState(false);
+  const [depAmt, setDepAmt] = useState(10);
+  const [dep, setDep] = useState<{
+    status: 'approving' | 'crediting' | 'done' | 'failed';
+    amount: number;
+    error?: string;
+  } | null>(null);
   // Reveal pacing: `suspense` keeps the pending animation running before the
   // reveal shows; `settling` holds the verdict while a landing animation
   // (wheel, plinko) plays out. The result itself is already committed.
@@ -90,6 +103,7 @@ export function Arcade() {
     if (b.house) setHouse(b.house);
     if (b.games?.length) setGames(b.games);
     if (b.daily) setDailyDef(b.daily);
+    if (b.deposit) setDepInfo(b.deposit);
     if (b.houseStats) {
       setHouseStats(b.houseStats);
       if (b.houseStats.jackpotUct != null) setPot(b.houseStats.jackpotUct);
@@ -228,13 +242,54 @@ export function Arcade() {
   }, [result, hold]);
 
   const startCashOut = async () => {
-    if (!wallet.identity || (you?.chips ?? 0) < 5 || cash?.status === 'pending') return;
+    if (!wallet.identity || (you?.chips ?? 0) < 1 || cash?.status === 'pending') return;
     try {
       const r = await cashOut(addressOf(wallet.identity)!, nameOf(wallet.identity));
       setCash({ id: r.settlementId, amount: r.amountUct, status: 'pending' });
       setYou((prev) => (prev ? { ...prev, chips: 0 } : prev));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Cash-out failed.');
+      setError(e instanceof Error ? e.message : 'Withdraw failed.');
+    }
+  };
+
+  /**
+   * Real deposit: the wallet opens its own approval UI for the transfer
+   * (send intent); once approved, the house sees the incoming transfer and
+   * credits the balance — we poll until it lands.
+   */
+  const startDeposit = async () => {
+    if (!wallet.identity || !depInfo) return;
+    if (dep?.status === 'approving' || dep?.status === 'crediting') return;
+    const amount = Math.max(1, Math.floor(depAmt));
+    const baseline = you?.chips ?? 0;
+    setDep({ status: 'approving', amount });
+    try {
+      const amountBase = (BigInt(amount) * 10n ** BigInt(depInfo.decimals)).toString();
+      await wallet.deposit({ to: depInfo.to, amountBase, coinId: depInfo.coinId });
+      setDep({ status: 'crediting', amount });
+      const addr = addressOf(wallet.identity)!;
+      for (let i = 0; i < 45; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        try {
+          const b = await fetchBalance(addr);
+          if (b.balanceUct > baseline) {
+            setYou((prev) => (prev ? { ...prev, chips: b.balanceUct } : prev));
+            setDep({ status: 'done', amount: b.balanceUct - baseline });
+            sfx.cashout();
+            refreshBoard();
+            return;
+          }
+        } catch {
+          /* transient — keep polling */
+        }
+      }
+      setDep({
+        status: 'failed',
+        amount,
+        error: 'transfer approved — crediting is taking longer than usual, it will land shortly',
+      });
+    } catch (e) {
+      setDep({ status: 'failed', amount, error: e instanceof Error ? e.message : 'wallet rejected the transfer' });
     }
   };
 
@@ -413,8 +468,8 @@ export function Arcade() {
               <em>the floor</em>
             </h2>
             <p className="lockbox__lede">
-              Your wallet is your seat. Connect to claim <b>25 free chips</b>, play 7 provably-fair
-              games, and cash winnings out as real on-chain UCT.
+              Your wallet is your seat. Connect for a <b>5 UCT welcome stake</b>, buy in from your
+              own wallet, and withdraw winnings on-chain any time.
             </p>
             <button
               className="lockbox__cta"
@@ -436,7 +491,59 @@ export function Arcade() {
     <section className="arcade">
       <Hero house={house} />
 
-      <EventsBar you={you} dailyDef={dailyDef} cash={cash} onCashOut={() => void startCashOut()} />
+      <EventsBar
+        you={you}
+        dailyDef={dailyDef}
+        cash={cash}
+        dep={dep}
+        onCashOut={() => void startCashOut()}
+        onDeposit={() => setDepOpen((v) => !v)}
+      />
+
+      {depOpen && (
+        <div className="depbar">
+          <span className="betbar__label">buy in</span>
+          {[10, 25, 50].map((a) => (
+            <button
+              key={a}
+              className={`betbtn${depAmt === a ? ' betbtn--on' : ''}`}
+              onClick={() => {
+                sfx.bet();
+                setDepAmt(a);
+              }}
+            >
+              {a}
+            </button>
+          ))}
+          <input
+            className="betinput"
+            type="number"
+            min={1}
+            step={1}
+            value={depAmt}
+            onChange={(e) => setDepAmt(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+            aria-label="deposit amount in UCT"
+          />
+          <button
+            className="depbar__go"
+            onClick={() => void startDeposit()}
+            disabled={!depInfo || dep?.status === 'approving' || dep?.status === 'crediting'}
+          >
+            {dep?.status === 'approving'
+              ? 'approve in your wallet…'
+              : dep?.status === 'crediting'
+                ? 'crediting…'
+                : `deposit ${depAmt} UCT`}
+          </button>
+          <span className="depbar__note">
+            {dep?.status === 'failed'
+              ? dep.error
+              : dep?.status === 'done'
+                ? `+${dep.amount} UCT credited ✓`
+                : 'your wallet opens and asks you to approve the transfer'}
+          </span>
+        </div>
+      )}
 
       {pot != null && <JackpotSign pot={pot} />}
 
@@ -539,11 +646,11 @@ export function Arcade() {
                 >
                   max
                 </button>
-                <span className="betbar__unit">chips</span>
+                <span className="betbar__unit">UCT</span>
                 {(you?.chips ?? 0) === 0 ? (
-                  <span className="betbar__empty">out of chips for today — fresh 25 at 00:00 UTC</span>
+                  <span className="betbar__empty">no balance — deposit from your wallet to play</span>
                 ) : (you?.chips ?? 0) < bet ? (
-                  <span className="betbar__empty">bet is over your {you?.chips} chip balance</span>
+                  <span className="betbar__empty">bet is over your {you?.chips} UCT balance</span>
                 ) : null}
               </div>
             )}
@@ -592,14 +699,14 @@ export function Arcade() {
             )}
             <div className={`gverdict verdict--${outcome}`}>
               {outcome === 'win'
-                ? `YOU WON +${result.rewardUct} CHIPS`
+                ? `YOU WON +${result.rewardUct} UCT`
                 : outcome === 'lose'
-                  ? `YOU LOST ${result.bet} ${result.bet === 1 ? 'CHIP' : 'CHIPS'}`
+                  ? `YOU LOST ${result.bet} UCT`
                   : 'PUSH'}
             </div>
             <div className="outcome__pay">
               {outcome === 'win' ? (
-                <span className="pay pay--ok">✓ added to your stack — balance {result.chips} chips</span>
+                <span className="pay pay--ok">✓ added to your balance — {result.chips} UCT</span>
               ) : outcome === 'tie' ? (
                 <span className="pay">a push — your bet came back</span>
               ) : (
@@ -652,7 +759,7 @@ export function Arcade() {
                   <span className="brow__wl">
                     {r.wins}W · {r.losses}L · {r.ties}T
                   </span>
-                  <span className="brow__earned">{r.earnedUct} chips</span>
+                  <span className="brow__earned">{r.earnedUct} UCT</span>
                 </div>
               ))}
             </div>
@@ -803,8 +910,8 @@ function Hero({ house }: { house: string | null }) {
     <div className="arcade__hero">
       <h2 className="arcade__title">The Game Hall</h2>
       <p className="arcade__lede">
-        A hall of provably-fair games vs an autonomous house. Bet chips, win multipliers, and cash
-        out real testnet UCT — sent on-chain by the agent itself, no human in the loop.
+        A hall of provably-fair games vs an autonomous house. Bet real testnet UCT, win
+        multipliers, and withdraw on-chain — settled by the agent itself, no human in the loop.
       </p>
       <div className="arcade__meta">
         <span className="arcade__chip arcade__chip--house">
@@ -823,12 +930,16 @@ function EventsBar({
   you,
   dailyDef,
   cash,
+  dep,
   onCashOut,
+  onDeposit,
 }: {
   you: PlayerSnapshot | null;
   dailyDef: { goal: number; reward: number } | null;
   cash: { id: string; amount: number; status: 'pending' | 'landed' | 'failed'; txId?: string } | null;
+  dep: { status: 'approving' | 'crediting' | 'done' | 'failed'; amount: number; error?: string } | null;
   onCashOut: () => void;
+  onDeposit: () => void;
 }) {
   const chips = you?.chips ?? null;
   const streak = you?.streak ?? 0;
@@ -842,24 +953,34 @@ function EventsBar({
       <div className="events__chips">
         <div className="events__chips-top">
           <span className="events__chips-n">{chips ?? '…'}</span>
-          <span className="events__chips-l">chips</span>
+          <span className="events__chips-l">UCT</span>
         </div>
-        <button
-          className="cashout"
-          onClick={onCashOut}
-          disabled={(chips ?? 0) < 5 || cash?.status === 'pending'}
-          title="Convert your chips 1:1 into real UCT — the house agent sends it to your wallet on-chain. Minimum 5 chips."
-        >
-          {cash?.status === 'pending' ? 'sending on-chain…' : 'cash out → UCT'}
-        </button>
+        <div className="events__bank">
+          <button
+            className="cashout cashout--deposit"
+            onClick={onDeposit}
+            title="Buy in with real UCT from your Sphere wallet — you approve the transfer in the wallet itself."
+          >
+            {dep?.status === 'approving' || dep?.status === 'crediting' ? 'depositing…' : 'deposit'}
+          </button>
+          <button
+            className="cashout"
+            onClick={onCashOut}
+            disabled={(chips ?? 0) < 1 || cash?.status === 'pending'}
+            title="Withdraw your balance 1:1 — the house agent sends real UCT to your wallet on-chain."
+          >
+            {cash?.status === 'pending' ? 'sending…' : 'withdraw'}
+          </button>
+        </div>
         {cash?.status === 'landed' && (
           <div className="events__cash events__cash--ok" title={cash.txId}>
             ✓ {cash.amount} UCT sent on-chain
           </div>
         )}
         {cash?.status === 'failed' && (
-          <div className="events__cash events__cash--bad">testnet hiccup — chips returned</div>
+          <div className="events__cash events__cash--bad">testnet hiccup — balance restored</div>
         )}
+        {dep?.status === 'done' && <div className="events__cash events__cash--ok">✓ +{dep.amount} UCT deposited</div>}
       </div>
       <div className="events__streak">
         <span
@@ -873,7 +994,7 @@ function EventsBar({
       <div className="events__daily">
         <div className="events__daily-top">
           <span>Daily challenge · win {goal}</span>
-          <span className="events__daily-reward">{claimed ? '✓ claimed' : `+${reward} chips`}</span>
+          <span className="events__daily-reward">{claimed ? '✓ claimed' : `+${reward} UCT`}</span>
         </div>
         <div className="events__bar">
           <div className="events__fill" style={{ width: `${pct}%` }} />

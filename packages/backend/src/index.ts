@@ -45,6 +45,24 @@ async function boot(): Promise<void> {
   await houseAgent.start();
   dealer = new GameDealer({ agent: houseAgent, cooldownMs: 800, logger: createLogger('dealer') });
   await dealer.start();
+
+  // Deposits: watch the house wallet for incoming transfers and credit the
+  // sender's in-house balance. receive() also sweeps anything already pending;
+  // the poll makes crediting robust regardless of subscription semantics
+  // (creditDeposit is idempotent per transfer id).
+  const sweepDeposits = () =>
+    houseAgent
+      .receive((t) => {
+        try {
+          dealer?.creditDeposit(t as Parameters<NonNullable<typeof dealer>['creditDeposit']>[0]);
+        } catch (e) {
+          log.warn('deposit credit failed', e instanceof Error ? e.message : e);
+        }
+      })
+      .catch((e: unknown) => log.warn('deposit sweep failed', e instanceof Error ? e.message : e));
+  void sweepDeposits();
+  setInterval(sweepDeposits, 20_000);
+
   ready = true;
   log.info(`arcade online — house @${houseAgent.nametag}`);
 }
@@ -101,9 +119,17 @@ const server = http.createServer((req, res) => {
         games: ARCADE_GAMES,
         rows: dealer!.leaderboard(),
         daily: dealer!.dailyInfo(),
+        deposit: dealer!.depositInfo(),
         houseStats,
       });
     });
+    return;
+  }
+
+  // The caller's in-house UCT balance (polled after a wallet deposit).
+  if (pathname === '/api/arcade/balance') {
+    const address = url.searchParams.get('address') ?? '';
+    json(res, 200, dealer && address ? dealer.balanceOf(address) : { balanceUct: 0 });
     return;
   }
 

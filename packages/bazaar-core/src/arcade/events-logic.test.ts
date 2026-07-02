@@ -7,8 +7,8 @@ import {
   DAILY_REWARD,
   newPlayerState,
   streakBonus,
-  topUpChips,
-  DAILY_CHIPS,
+  welcomeGrant,
+  WELCOME_UCT,
 } from './events-logic.js';
 
 describe('streak bonus', () => {
@@ -66,27 +66,20 @@ describe('applyWin / applyLoss', () => {
   });
 });
 
-describe('daily chip top-up', () => {
-  it('tops a fresh player up to the floor, once per day', () => {
-    const day = '2026-07-02';
-    const first = topUpChips(newPlayerState(), day);
-    expect(first.state.chips).toBe(DAILY_CHIPS);
-    expect(first.granted).toBe(DAILY_CHIPS);
-    const again = topUpChips(first.state, day);
+describe('welcome stake', () => {
+  it('grants the one-time welcome exactly once', () => {
+    const first = welcomeGrant(newPlayerState());
+    expect(first.state.chips).toBe(WELCOME_UCT);
+    expect(first.granted).toBe(WELCOME_UCT);
+    const again = welcomeGrant(first.state);
     expect(again.granted).toBe(0);
+    expect(again.state.chips).toBe(WELCOME_UCT);
   });
 
-  it('never drips onto a stack already above the floor', () => {
-    const rich = { ...newPlayerState(), chips: 90, chipsDay: '2026-07-01' };
-    const t = topUpChips(rich, '2026-07-02');
-    expect(t.state.chips).toBe(90);
-    expect(t.granted).toBe(0);
-  });
-
-  it('refills a busted stack on the next day', () => {
-    const busted = { ...newPlayerState(), chips: 3, chipsDay: '2026-07-01' };
-    const t = topUpChips(busted, '2026-07-02');
-    expect(t.state.chips).toBe(DAILY_CHIPS);
-    expect(t.granted).toBe(DAILY_CHIPS - 3);
+  it('adds on top of an existing (deposited) balance', () => {
+    const rich = { ...newPlayerState(), chips: 40 };
+    const t = welcomeGrant(rich);
+    expect(t.state.chips).toBe(40 + WELCOME_UCT);
+    expect(t.state.welcomed).toBe(true);
   });
 });

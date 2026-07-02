@@ -85,11 +85,19 @@ export interface LeaderRow {
 }
 
 export interface HouseEvent {
-  kind: 'win' | 'mint' | 'jackpot' | 'cashout';
+  kind: 'win' | 'mint' | 'jackpot' | 'cashout' | 'deposit';
   at: number;
   amountUct: number;
   name?: string;
   game?: string;
+}
+
+/** Where and what to send for a wallet deposit (builds the send-intent). */
+export interface DepositInfo {
+  to: string;
+  coinId: string;
+  decimals: number;
+  symbol: string;
 }
 
 export interface HouseStats {
@@ -108,6 +116,7 @@ export interface Leaderboard {
   games: GameMeta[];
   rows: LeaderRow[];
   daily?: { goal: number; reward: number } | null;
+  deposit?: DepositInfo;
   houseStats?: HouseStats;
 }
 
@@ -146,9 +155,17 @@ export function playRound(input: {
   });
 }
 
-/** Cash the connected wallet's chips out 1:1 as UCT, settled on-chain by the house. */
+/** Withdraw the wallet's in-house balance 1:1 as UCT, settled on-chain by the house. */
 export function cashOut(address: string, name?: string): Promise<{ settlementId: string; amountUct: number }> {
   return post<{ settlementId: string; amountUct: number }>('/api/arcade/cashout', { address, name });
+}
+
+/** The caller's in-house UCT balance (polled after a wallet deposit). */
+export async function fetchBalance(address: string): Promise<{ balanceUct: number }> {
+  const r = await fetch(`${BACKEND_URL}/api/arcade/balance?address=${encodeURIComponent(address)}`, {
+    signal: AbortSignal.timeout(8_000),
+  });
+  return (await r.json()) as { balanceUct: number };
 }
 
 export async function fetchLeaderboard(): Promise<Leaderboard> {

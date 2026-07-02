@@ -7,10 +7,8 @@ import {
   applyWin,
   dailyView,
   newPlayerState,
-  rescueChips,
   todayKey,
-  topUpChips,
-  DAILY_CHIPS,
+  welcomeGrant,
   DAILY_GOAL,
   DAILY_REWARD,
   type DailyView,
@@ -133,13 +131,22 @@ export interface LeaderRow {
   earnedUct: number;
 }
 
-/** A public house-side event: an on-chain cash-out, a jackpot, or the agent self-funding its treasury. */
+/** A public house-side event: a deposit, an on-chain cash-out, a jackpot, or a treasury self-mint. */
 export interface HouseEvent {
-  kind: 'win' | 'mint' | 'jackpot' | 'cashout';
+  kind: 'win' | 'mint' | 'jackpot' | 'cashout' | 'deposit';
   at: number;
   amountUct: number;
   name?: string;
   game?: string;
+}
+
+/** The minimal shape of an incoming wallet transfer we credit as a deposit. */
+export interface DepositTransfer {
+  id: string;
+  senderPubkey: string;
+  senderNametag?: string;
+  memo?: string;
+  tokens: { coinId: string; symbol: string; amount: string }[];
 }
 
 /** Live transparency stats for the autonomous house (since last restart). */
@@ -242,15 +249,14 @@ export class GameDealer {
     const commit = commitHash(secret, nonce);
     const roundId = `${gameId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.rounds.set(roundId, { gameId, secret, nonce, commit, publicState, createdAt: Date.now() });
-    // Daily chip top-up on the first deal of the day; a busted (or fully
-    // cashed-out) stack gets staked once more per day so nobody sits locked out.
+    // One-time welcome stake so a fresh wallet can try the games; after this,
+    // the balance moves only via deposits, bets, and withdrawals.
     const key = this.keyFor(playerAddress);
     const day = todayKey();
-    const topped = topUpChips(this.players.get(key) ?? newPlayerState(), day);
-    const rescued = rescueChips(topped.state, day);
-    this.players.set(key, rescued.state);
-    const state = rescued.state;
-    const granted = topped.granted + rescued.granted;
+    const welcomed = welcomeGrant(this.players.get(key) ?? newPlayerState());
+    this.players.set(key, welcomed.state);
+    const state = welcomed.state;
+    const granted = welcomed.granted;
     return {
       game: gameId,
       roundId,
@@ -288,15 +294,14 @@ export class GameDealer {
     if (!game) throw new Error('Unknown game.');
     const resolved = game.resolveInput(input.choice); // throws on invalid input
 
-    // The bet is staked from the player's chips — validate before the round is
-    // spent. Any size goes, as long as the balance covers it.
+    // The bet is staked from the player's balance — validate before the round
+    // is spent. Any size goes, as long as the balance covers it.
     const bet = Math.floor(Number(input.bet ?? 1));
-    if (!Number.isSafeInteger(bet) || bet < 1) throw new Error('Bet must be a whole number of chips (1+).');
+    if (!Number.isSafeInteger(bet) || bet < 1) throw new Error('Bet must be a whole number of UCT (1+).');
     const key = this.keyFor(input.playerAddress);
-    const day = todayKey();
-    let state = rescueChips(topUpChips(this.players.get(key) ?? newPlayerState(), day).state, day).state;
+    let state = welcomeGrant(this.players.get(key) ?? newPlayerState()).state;
     if (state.chips < bet) {
-      throw new Error(`Not enough chips — you have ${state.chips}. The daily top-up refills to ${DAILY_CHIPS}.`);
+      throw new Error(`Not enough UCT — you have ${state.chips}. Deposit from your wallet to keep playing.`);
     }
     this.rounds.delete(input.roundId); // one-shot: a commitment is spent once
 
@@ -377,12 +382,69 @@ export class GameDealer {
     };
   }
 
-  /** Cash the player's chips out 1:1 as real UCT, settled on-chain by the house. */
+  /** The player's in-house UCT balance. */
+  balanceOf(address: string): { balanceUct: number } {
+    const state = this.players.get(this.keyFor(address));
+    return { balanceUct: state?.chips ?? 0 };
+  }
+
+  /** Where and what to send for a wallet deposit (used to build the send-intent). */
+  depositInfo(): { to: string; coinId: string; decimals: number; symbol: string } {
+    const { coinId, decimals } = this.agent.uctCoin;
+    return { to: `@${this.house.replace(/^@/, '')}`, coinId, decimals, symbol: 'UCT' };
+  }
+
+  private readonly seenDeposits = new Set<string>();
+
+  /**
+   * Credit an incoming wallet transfer to the sender's in-house balance.
+   * Matched by the sender's chain pubkey (the dashboard's canonical player
+   * key), falling back to the sender's nametag. Idempotent per transfer id.
+   */
+  creditDeposit(t: DepositTransfer): { credited: number; key: string } | null {
+    if (!t?.id || this.seenDeposits.has(t.id)) return null;
+    this.seenDeposits.add(t.id);
+    if (this.seenDeposits.size > 2000) {
+      const first = this.seenDeposits.values().next().value as string | undefined;
+      if (first !== undefined) this.seenDeposits.delete(first);
+    }
+    const { coinId } = this.agent.uctCoin;
+    let total = 0n;
+    for (const tok of t.tokens ?? []) {
+      if (tok.symbol === 'UCT' || tok.coinId === coinId) {
+        try {
+          total += BigInt(tok.amount || '0');
+        } catch {
+          /* malformed token amount — skip */
+        }
+      }
+    }
+    if (total <= 0n) return null;
+    const amount = Math.floor(Number(this.agent.toHuman(total)));
+    if (amount < 1) return null;
+
+    // Match the depositor to a player key: pubkey first, then nametag forms.
+    const candidates = [
+      t.senderPubkey,
+      t.senderNametag ? `@${t.senderNametag.replace(/^@/, '')}` : undefined,
+      t.senderNametag?.replace(/^@/, ''),
+    ].filter((c): c is string => !!c);
+    const key = candidates.find((c) => this.players.has(c)) ?? t.senderPubkey;
+
+    const state = this.players.get(key) ?? newPlayerState();
+    this.players.set(key, { ...state, chips: state.chips + amount });
+    const name = (t.senderNametag ?? t.senderPubkey).replace(/^@/, '').slice(0, 24);
+    this.pushEvent({ kind: 'deposit', at: Date.now(), amountUct: amount, name });
+    this.log.info(`deposit credited: +${amount} UCT from @${name}`);
+    return { credited: amount, key };
+  }
+
+  /** Withdraw the player's balance 1:1 as real UCT, settled on-chain by the house. */
   cashOut(address: string, name?: string): { settlementId: string; amountUct: number } {
     const key = this.keyFor(address);
     const state = this.players.get(key) ?? newPlayerState();
     const amount = state.chips;
-    if (amount < 5) throw new Error('Cash-out needs at least 5 chips.');
+    if (amount < 1) throw new Error('Withdraw needs at least 1 UCT.');
     this.players.set(key, { ...state, chips: 0 });
     const cleanName = (name || address).replace(/^@/, '').slice(0, 24);
     const settlementId = `cashout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

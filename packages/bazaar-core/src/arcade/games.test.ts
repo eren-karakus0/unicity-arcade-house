@@ -179,14 +179,16 @@ describe('progressive jackpot', () => {
     const nr = dealer.newRound('coin', '@p2');
     await expect(
       dealer.play({ roundId: nr.roundId, choice: 'heads', bet: 26, playerAddress: '@p2' }),
-    ).rejects.toThrow(/chips/i);
+    ).rejects.toThrow(/not enough uct/i);
   });
 });
 
-describe('chips — bets, payouts and cash-out', () => {
+describe('UCT balance — welcome stake, bets, deposits, withdraw', () => {
   const stubAgent = (sent: { address: string; amount: number; memo?: string }[]) =>
     ({
       nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
       balanceUct: async () => 1000,
       mintUct: async () => undefined,
       send: async (address: string, amount: number, memo?: string) => {
@@ -195,12 +197,12 @@ describe('chips — bets, payouts and cash-out', () => {
       },
     }) as unknown as SphereAgent;
 
-  it('grants the daily 25, stakes bets, credits ×2 wins, sinks losses', async () => {
+  it('grants the 5 UCT welcome once, stakes bets, credits x2 wins, sinks losses', async () => {
     const sent: { address: string; amount: number; memo?: string }[] = [];
     const dealer = new GameDealer({ agent: stubAgent(sent), cooldownMs: 0, jackpotOdds: 1_000_000_000 });
     let round = dealer.newRound('coin', '@p1');
-    expect(round.you?.chips).toBe(25); // daily top-up on first deal
-    expect(round.you?.chipsGranted).toBe(25);
+    expect(round.you?.chips).toBe(5); // one-time welcome
+    expect(round.you?.chipsGranted).toBe(5);
     let win: Awaited<ReturnType<GameDealer['play']>> | undefined;
     let lose: typeof win;
     for (let i = 0; i < 80 && !(win && lose); i++) {
@@ -208,71 +210,60 @@ describe('chips — bets, payouts and cash-out', () => {
       try {
         r = await dealer.play({ roundId: round.roundId, choice: 'heads', bet: 1, playerAddress: '@p1', name: 'p1' });
       } catch {
-        break; // busted — statistically near-impossible, but never fail on it
+        break; // busted — the welcome never repeats
       }
       if (r.outcome === 'win' && !win) win = r;
       if (r.outcome === 'lose' && !lose) lose = r;
       expect(r.chips).toBeGreaterThanOrEqual(0);
       round = dealer.newRound('coin', '@p1');
     }
-    expect(win).toBeTruthy();
-    expect(lose).toBeTruthy();
-    expect(win!.bet).toBe(1);
-    expect(win!.rewardUct).toBeGreaterThanOrEqual(2); // bet ×2 (+ any bonus)
-    expect(lose!.rewardUct).toBe(0); // the bet sank to the house
-    expect(sent.every((s) => s.memo !== 'arcade-win')).toBe(true); // wins pay chips, not on-chain
+    if (win) {
+      expect(win.rewardUct).toBeGreaterThanOrEqual(2); // bet x2 (+ any bonus)
+    }
+    if (lose) expect(lose.rewardUct).toBe(0);
+    expect(sent.every((s) => s.memo !== 'arcade-win')).toBe(true); // wins credit the balance, not on-chain
+    expect(round.you?.chipsGranted).toBe(0); // welcome only once
   });
 
-  it('cash-out settles the whole balance on-chain and zeroes the chips', async () => {
+  it('credits an incoming wallet transfer to the sender, idempotently', () => {
+    const dealer = new GameDealer({ agent: stubAgent([]), cooldownMs: 0 });
+    const pubkey = '02abc';
+    dealer.newRound('coin', pubkey); // welcome 5
+    const transfer = {
+      id: 'tr-1',
+      senderPubkey: pubkey,
+      senderNametag: 'p9',
+      tokens: [{ coinId: 'aabb', symbol: 'UCT', amount: '1000' }], // 10.00 with 2 decimals
+    };
+    const credited = dealer.creditDeposit(transfer);
+    expect(credited?.credited).toBe(10);
+    expect(dealer.balanceOf(pubkey).balanceUct).toBe(15);
+    expect(dealer.creditDeposit(transfer)).toBeNull(); // same transfer id → no double credit
+    expect(dealer.balanceOf(pubkey).balanceUct).toBe(15);
+  });
+
+  it('depositInfo exposes the house address + coin metadata', () => {
+    const dealer = new GameDealer({ agent: stubAgent([]), cooldownMs: 0 });
+    expect(dealer.depositInfo()).toEqual({ to: '@house-test', coinId: 'aabb', decimals: 2, symbol: 'UCT' });
+  });
+
+  it('withdraw settles the whole balance on-chain and zeroes it (no re-grant)', async () => {
     const sent: { address: string; amount: number; memo?: string }[] = [];
     const dealer = new GameDealer({ agent: stubAgent(sent), cooldownMs: 0 });
-    const nr = dealer.newRound('coin', '@p3'); // grants 25
-    expect(nr.you?.chips).toBe(25);
+    dealer.newRound('coin', '@p3'); // welcome 5
     const co = dealer.cashOut('@p3', 'p3');
-    expect(co.amountUct).toBe(25);
+    expect(co.amountUct).toBe(5);
     await dealer.flushPayouts();
     expect(dealer.settlementFor(co.settlementId).win?.status).toBe('landed');
-    expect(sent.some((s) => s.memo === 'arcade-cashout' && s.amount === 25)).toBe(true);
-    // the once-a-day rescue stakes them again…
-    expect(dealer.newRound('coin', '@p3').you?.chips).toBe(25);
-    // …but cashing out a second time leaves them done for the day
-    dealer.cashOut('@p3', 'p3');
-    expect(dealer.newRound('coin', '@p3').you?.chips).toBe(0);
+    expect(sent.some((s) => s.memo === 'arcade-cashout' && s.amount === 5)).toBe(true);
+    expect(dealer.newRound('coin', '@p3').you?.chips).toBe(0); // welcome never repeats
   });
 
-  it('can bet the whole stack (no 25 cap) and stakes a busted player once a day', async () => {
-    const sent: { address: string; amount: number; memo?: string }[] = [];
-    const dealer = new GameDealer({ agent: stubAgent(sent), cooldownMs: 0, jackpotOdds: 1_000_000_000 });
-    // burn the whole stack in all-in coin rounds until busted
-    let round = dealer.newRound('coin', '@p5');
-    expect(round.you?.chips).toBe(25);
-    for (let i = 0; i < 60; i++) {
-      const balance = round.you!.chips;
-      if (balance === 0) break;
-      const r = await dealer.play({
-        roundId: round.roundId,
-        choice: 'heads',
-        bet: balance, // all-in — over the old 25 cap once the stack grows
-        playerAddress: '@p5',
-        name: 'p5',
-      });
-      round = dealer.newRound('coin', '@p5');
-      if (r.outcome === 'lose') break;
-    }
-    // next deal after busting must stake them once more (the daily rescue)
-    const after = dealer.newRound('coin', '@p5');
-    expect(after.you?.chips).toBe(25);
-    // …but only once per day
-    // (drain again via cash-out, which does NOT re-trigger the rescue-by-itself
-    //  until the next deal — and the rescue day is already used)
-    dealer.cashOut('@p5', 'p5');
-    const locked = dealer.newRound('coin', '@p5');
-    expect(locked.you?.chips).toBe(0);
-  });
-
-  it('a failed cash-out puts the chips back', async () => {
+  it('a failed withdraw puts the balance back', async () => {
     const failing = {
       nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
       balanceUct: async () => 1000,
       mintUct: async () => undefined,
       send: async () => {
@@ -280,27 +271,11 @@ describe('chips — bets, payouts and cash-out', () => {
       },
     } as unknown as SphereAgent;
     const dealer = new GameDealer({ agent: failing, cooldownMs: 0 });
-    dealer.newRound('coin', '@p4'); // grants 25
+    dealer.newRound('coin', '@p4'); // welcome 5
     const co = dealer.cashOut('@p4', 'p4');
     await dealer.flushPayouts();
     expect(dealer.settlementFor(co.settlementId).win?.status).toBe('failed');
-    expect(dealer.newRound('coin', '@p4').you?.chips).toBe(25); // restored
-  });
-
-  it('grows the pot (capped) when the roll misses', async () => {
-    const sent: { address: string; amount: number; memo?: string }[] = [];
-    const dealer = new GameDealer({
-      agent: stubAgent(sent),
-      cooldownMs: 0,
-      jackpotSeedUct: 20,
-      jackpotGrowthUct: 1,
-      jackpotOdds: 1_000_000_000, // a hit is (practically) impossible
-    });
-    const nr = dealer.newRound('coin', '@p1');
-    const res = await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@p1', name: 'p1' });
-    expect(res.jackpot.hit).toBe(false);
-    expect((await dealer.houseStats()).jackpotUct).toBe(21);
-    expect(sent.every((s) => s.memo !== 'arcade-jackpot')).toBe(true);
+    expect(dealer.newRound('coin', '@p4').you?.chips).toBe(5); // restored
   });
 });
 

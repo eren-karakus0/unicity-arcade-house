@@ -8,17 +8,18 @@ export interface PlayerState {
   dailyDay: string; // UTC YYYY-MM-DD the daily counters belong to
   dailyWins: number;
   dailyClaimed: boolean;
-  /** Chip balance — bets are staked from it; cash-out settles it on-chain 1:1. */
+  /**
+   * In-house UCT balance. Funded by real wallet deposits (plus a one-time
+   * welcome stake); bets stake it; withdraw settles it on-chain 1:1.
+   */
   chips: number;
-  /** UTC day the last daily chip top-up was applied. */
-  chipsDay: string;
-  /** UTC day the once-a-day bust rescue was used. */
-  rescueDay: string;
+  /** One-time welcome stake already granted. */
+  welcomed: boolean;
 }
 
 export const DAILY_GOAL = 5;
 export const DAILY_REWARD = 10;
-export const DAILY_CHIPS = 25;
+export const WELCOME_UCT = 5;
 
 export function newPlayerState(): PlayerState {
   return {
@@ -28,36 +29,21 @@ export function newPlayerState(): PlayerState {
     dailyWins: 0,
     dailyClaimed: false,
     chips: 0,
-    chipsDay: '',
-    rescueDay: '',
+    welcomed: false,
   };
 }
 
 /**
- * Once per UTC day, top a player's chips up to the daily floor. Balances above
- * the floor are untouched — the house never drips chips onto a full stack.
+ * A one-time welcome stake so a brand-new wallet can feel the games before
+ * depositing. Never repeats — after this, the balance moves only via deposits,
+ * bets, and withdrawals.
  */
-export function topUpChips(prev: PlayerState, day: string, floor: number = DAILY_CHIPS): {
+export function welcomeGrant(prev: PlayerState, amount: number = WELCOME_UCT): {
   state: PlayerState;
   granted: number;
 } {
-  if (prev.chipsDay === day) return { state: prev, granted: 0 };
-  const chips = Math.max(prev.chips, floor);
-  return { state: { ...prev, chips, chipsDay: day }, granted: chips - prev.chips };
-}
-
-/**
- * Once a day, a player sitting on zero chips (busted or fully cashed out) gets
- * staked once more so they can keep playing. Independent of the daily top-up,
- * and not farmable: extraction still only happens via cash-out, capped at
- * (top-up + one rescue) per day.
- */
-export function rescueChips(prev: PlayerState, day: string, stake: number = DAILY_CHIPS): {
-  state: PlayerState;
-  granted: number;
-} {
-  if (prev.chips > 0 || prev.rescueDay === day) return { state: prev, granted: 0 };
-  return { state: { ...prev, chips: stake, rescueDay: day }, granted: stake };
+  if (prev.welcomed) return { state: prev, granted: 0 };
+  return { state: { ...prev, chips: prev.chips + amount, welcomed: true }, granted: amount };
 }
 
 export function todayKey(now: number = Date.now()): string {
