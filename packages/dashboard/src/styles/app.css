@@ -784,6 +784,121 @@
   z-index: 2;
 }
 
+/* live-wins ticker — real payouts from the house feed */
+.ticker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+.ticker__tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ticker__clip { overflow: hidden; flex: 1; min-width: 0; }
+.ticker__track {
+  display: inline-flex;
+  gap: 34px;
+  padding-right: 34px;
+  white-space: nowrap;
+  animation: ticker-roll 26s linear infinite;
+}
+.ticker__clip:hover .ticker__track { animation-play-state: paused; }
+@keyframes ticker-roll {
+  to { transform: translateX(-50%); }
+}
+.ticker__item {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.ticker__item strong { color: var(--accent); font-weight: 600; }
+.ticker__item em { font-style: normal; color: var(--text-muted); }
+
+/* the house — live transparency panel */
+.housep {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.housep__head { display: flex; align-items: center; gap: 10px; }
+.housep__title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.housep__tag {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+}
+.housep__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+.stat {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 10px 12px;
+  text-align: center;
+}
+.stat__v {
+  font-family: var(--font-display);
+  font-size: 20px;
+  letter-spacing: 0.03em;
+  color: var(--text-primary);
+}
+.stat__l {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+.housep__feed { display: flex; flex-direction: column; gap: 6px; }
+.hevent {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+}
+.hevent--mint {
+  color: var(--accent);
+  background: rgba(255, 111, 0, 0.07);
+  border: 1px solid var(--border-focus);
+}
+.hevent__t { color: var(--text-faint); white-space: nowrap; }
+.housep__note {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+}
+
 /* micro-interactions */
 .gcard:hover .gcard__art { animation: icon-wiggle 0.45s ease-in-out; }
 @keyframes icon-wiggle {
@@ -811,7 +926,8 @@
   .events__flame--hot,
   .gcard:hover .gcard__art,
   .wheel--idle,
-  .wheel--spin {
+  .wheel--spin,
+  .ticker__track {
     animation: none !important;
   }
   .wheel--land {

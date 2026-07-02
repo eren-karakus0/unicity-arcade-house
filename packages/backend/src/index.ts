@@ -92,13 +92,16 @@ const server = http.createServer((req, res) => {
       json(res, 200, { ready: false, house: null, baseRewardUct: 0, games: ARCADE_GAMES, rows: [], daily: null });
       return;
     }
-    json(res, 200, {
-      ready: true,
-      house: dealer.house,
-      baseRewardUct: dealer.baseRewardUct,
-      games: ARCADE_GAMES,
-      rows: dealer.leaderboard(),
-      daily: dealer.dailyInfo(),
+    void dealer.houseStats().then((houseStats) => {
+      json(res, 200, {
+        ready: true,
+        house: dealer!.house,
+        baseRewardUct: dealer!.baseRewardUct,
+        games: ARCADE_GAMES,
+        rows: dealer!.leaderboard(),
+        daily: dealer!.dailyInfo(),
+        houseStats,
+      });
     });
     return;
   }

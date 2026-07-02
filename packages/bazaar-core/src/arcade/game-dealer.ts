@@ -86,6 +86,27 @@ export interface LeaderRow {
   earnedUct: number;
 }
 
+/** A public house-side event: a paid win, or the agent self-funding its treasury. */
+export interface HouseEvent {
+  kind: 'win' | 'mint';
+  at: number;
+  amountUct: number;
+  name?: string;
+  game?: string;
+}
+
+/** Live transparency stats for the autonomous house (since last restart). */
+export interface HouseStats {
+  /** Last known treasury balance in UCT (null until first read). */
+  treasuryUct: number | null;
+  paidOutUct: number;
+  roundsPlayed: number;
+  winsPaid: number;
+  selfMintedUct: number;
+  /** Newest first, capped. */
+  feed: HouseEvent[];
+}
+
 interface TxLike {
   id?: string;
   deliveryState?: string;
@@ -114,6 +135,15 @@ export class GameDealer {
   private readonly board = new Map<string, LeaderRow>();
   private readonly players = new Map<string, PlayerState>();
   private payLock: Promise<void> = Promise.resolve();
+
+  // House transparency (since last restart).
+  private paidOut = 0;
+  private roundsPlayed = 0;
+  private winsPaid = 0;
+  private minted = 0;
+  private feed: HouseEvent[] = [];
+  private treasury: number | null = null;
+  private treasuryAt = 0;
 
   constructor(opts: GameDealerOptions) {
     this.agent = opts.agent;
@@ -218,6 +248,12 @@ export class GameDealer {
       }
     }
     this.record(name, judged.outcome, paid ? reward : 0);
+    this.roundsPlayed += 1;
+    if (paid) {
+      this.paidOut += reward;
+      this.winsPaid += 1;
+      this.pushEvent({ kind: 'win', at: Date.now(), amountUct: reward, name, game: round.gameId });
+    }
 
     return {
       game: round.gameId,
@@ -249,6 +285,30 @@ export class GameDealer {
     return [...this.board.values()]
       .sort((a, b) => b.wins - a.wins || b.earnedUct - a.earnedUct || a.played - b.played)
       .slice(0, limit);
+  }
+
+  /**
+   * Live house transparency: real treasury balance (refreshed at most every
+   * 15s), totals, and the recent win/self-mint feed.
+   */
+  async houseStats(): Promise<HouseStats> {
+    const now = Date.now();
+    if (now - this.treasuryAt > 15_000) {
+      try {
+        this.treasury = Number(await this.agent.balanceUct());
+        this.treasuryAt = now;
+      } catch {
+        /* keep the last known balance */
+      }
+    }
+    return {
+      treasuryUct: this.treasury,
+      paidOutUct: this.paidOut,
+      roundsPlayed: this.roundsPlayed,
+      winsPaid: this.winsPaid,
+      selfMintedUct: this.minted,
+      feed: this.feed.slice(0, 12),
+    };
   }
 
   // ---- internals ----
@@ -283,12 +343,21 @@ export class GameDealer {
     }
   }
 
+  private pushEvent(e: HouseEvent): void {
+    this.feed.unshift(e);
+    if (this.feed.length > 24) this.feed.length = 24;
+  }
+
   private async ensureTreasury(): Promise<void> {
     try {
       const balance = Number(await this.agent.balanceUct());
+      this.treasury = balance;
+      this.treasuryAt = Date.now();
       if (balance < this.minTreasury) {
         this.log.info(`house treasury ${balance} UCT — minting ${this.mintAmount}`);
         await this.agent.mintUct(this.mintAmount);
+        this.minted += this.mintAmount;
+        this.pushEvent({ kind: 'mint', at: Date.now(), amountUct: this.mintAmount });
       }
     } catch (e) {
       this.log.warn('treasury check failed', e instanceof Error ? e.message : e);

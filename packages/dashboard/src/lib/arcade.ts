@@ -67,6 +67,23 @@ export interface LeaderRow {
   earnedUct: number;
 }
 
+export interface HouseEvent {
+  kind: 'win' | 'mint';
+  at: number;
+  amountUct: number;
+  name?: string;
+  game?: string;
+}
+
+export interface HouseStats {
+  treasuryUct: number | null;
+  paidOutUct: number;
+  roundsPlayed: number;
+  winsPaid: number;
+  selfMintedUct: number;
+  feed: HouseEvent[];
+}
+
 export interface Leaderboard {
   ready: boolean;
   house: string | null;
@@ -74,6 +91,7 @@ export interface Leaderboard {
   games: GameMeta[];
   rows: LeaderRow[];
   daily?: { goal: number; reward: number } | null;
+  houseStats?: HouseStats;
 }
 
 export { hasBackend };

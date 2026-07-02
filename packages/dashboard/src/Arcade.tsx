@@ -10,6 +10,8 @@ import {
   verifyDice,
   verifyWheel,
   type GameMeta,
+  type HouseEvent,
+  type HouseStats,
   type LeaderRow,
   type NewRound,
   type PlayerSnapshot,
@@ -46,6 +48,7 @@ export function Arcade() {
   const [board, setBoard] = useState<LeaderRow[]>([]);
   const [games, setGames] = useState<GameMeta[]>(GAMES_META);
   const [house, setHouse] = useState<string | null>(null);
+  const [houseStats, setHouseStats] = useState<HouseStats | null>(null);
   const [baseReward, setBaseReward] = useState(1);
   const [you, setYou] = useState<PlayerSnapshot | null>(null);
   const [dailyDef, setDailyDef] = useState<{ goal: number; reward: number } | null>(null);
@@ -65,6 +68,7 @@ export function Arcade() {
     if (b.baseRewardUct) setBaseReward(b.baseRewardUct);
     if (b.games?.length) setGames(b.games);
     if (b.daily) setDailyDef(b.daily);
+    if (b.houseStats) setHouseStats(b.houseStats);
   }, []);
 
   const refreshBoard = useCallback(() => {
@@ -99,6 +103,13 @@ export function Arcade() {
       clearTimeout(timer);
     };
   }, [connected, applyBoard]);
+
+  // Keep the ticker + house panel fresh while the hall is open.
+  useEffect(() => {
+    if (!connected || ready !== true) return;
+    const t = setInterval(refreshBoard, 15_000);
+    return () => clearInterval(t);
+  }, [connected, ready, refreshBoard]);
 
   const deal = useCallback(
     async (gameId: string) => {
@@ -223,6 +234,8 @@ export function Arcade() {
       <Hero house={house} />
 
       <EventsBar you={you} dailyDef={dailyDef} />
+
+      <HouseTicker feed={houseStats?.feed ?? []} games={games} />
 
       <div className="picker">
         {games
@@ -379,7 +392,98 @@ export function Arcade() {
           </div>
         )}
       </div>
+
+      <HousePanel stats={houseStats} house={house} games={games} />
     </section>
+  );
+}
+
+function timeAgo(ts: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 10) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  return `${Math.floor(m / 60)}h ago`;
+}
+
+const gameTitle = (games: GameMeta[], id?: string) => games.find((g) => g.id === id)?.title ?? id ?? 'a game';
+
+/** Scrolling strip of real recent payouts from the house feed. */
+function HouseTicker({ feed, games }: { feed: HouseEvent[]; games: GameMeta[] }) {
+  const wins = feed.filter((e) => e.kind === 'win').slice(0, 8);
+  if (wins.length === 0) return null;
+  const items = (dup: boolean) =>
+    wins.map((w, i) => (
+      <span className="ticker__item" key={`${dup ? 'd' : 'a'}${i}`} aria-hidden={dup}>
+        <strong>@{w.name}</strong> won {w.amountUct} UCT on {gameTitle(games, w.game)}
+        <em> · {timeAgo(w.at)}</em>
+      </span>
+    ));
+  return (
+    <div className="ticker" aria-label="recent wins, paid on-chain by the house agent">
+      <span className="ticker__tag">live wins</span>
+      <div className="ticker__clip">
+        <div className="ticker__track">
+          {items(false)}
+          {items(true)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Live transparency for the autonomous house — real balances, real events. */
+function HousePanel({
+  stats,
+  house,
+  games,
+}: {
+  stats: HouseStats | null;
+  house: string | null;
+  games: GameMeta[];
+}) {
+  if (!stats) return null;
+  return (
+    <div className="housep">
+      <div className="housep__head">
+        <BotMark size={20} />
+        <span className="housep__title">The House — autonomous agent</span>
+        <span className="housep__tag">{house ? `@${house}` : '…'}</span>
+      </div>
+      <div className="housep__grid">
+        <Stat value={stats.treasuryUct === null ? '…' : `${stats.treasuryUct} UCT`} label="treasury, live" />
+        <Stat value={`${stats.paidOutUct} UCT`} label="paid to players" />
+        <Stat value={String(stats.roundsPlayed)} label="rounds dealt" />
+        <Stat value={`${stats.selfMintedUct} UCT`} label="self-funded" />
+      </div>
+      {stats.feed.length > 0 && (
+        <div className="housep__feed">
+          {stats.feed.slice(0, 6).map((e, i) => (
+            <div className={`hevent${e.kind === 'mint' ? ' hevent--mint' : ''}`} key={`${e.at}-${i}`}>
+              <span>
+                {e.kind === 'mint'
+                  ? `treasury low — the agent minted itself +${e.amountUct} UCT`
+                  : `paid @${e.name} +${e.amountUct} UCT · ${gameTitle(games, e.game)}`}
+              </span>
+              <span className="hevent__t">{timeAgo(e.at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="housep__note">
+        every number above is real: balance read from the wallet, payouts settled on testnet2 · since last restart
+      </div>
+    </div>
+  );
+}
+
+function Stat({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="stat">
+      <div className="stat__v">{value}</div>
+      <div className="stat__l">{label}</div>
+    </div>
   );
 }
 
