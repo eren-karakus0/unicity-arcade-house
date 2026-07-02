@@ -1172,16 +1172,16 @@
 }
 .jpot__bulbs {
   position: absolute;
-  left: 18px;
-  right: 18px;
-  height: 14px;
-  border-radius: 7px;
+  left: 16px;
+  right: 16px;
+  height: 10px;
+  border-radius: 5px;
   pointer-events: none;
-  background: radial-gradient(circle at 7px 7px, #ffd9a8 38%, #7a4e1c 40%, transparent 45%) 0 0 / 24px 14px;
+  background: radial-gradient(circle at 5px 5px, #ffd9a8 36%, #7a4e1c 40%, transparent 46%) 0 0 / 18px 10px;
   animation: bulbpulse 1.6s ease-in-out infinite;
 }
-.jpot__bulbs--top { top: -7px; }
-.jpot__bulbs--bottom { bottom: -7px; animation-delay: 0.8s; }
+.jpot__bulbs--top { top: -5px; }
+.jpot__bulbs--bottom { bottom: -5px; animation-delay: 0.8s; }
 @keyframes bulbpulse {
   0%, 100% { opacity: 0.9; box-shadow: 0 0 10px rgba(255, 209, 140, 0.5); }
   50% { opacity: 0.45; box-shadow: 0 0 3px rgba(255, 209, 140, 0.2); }

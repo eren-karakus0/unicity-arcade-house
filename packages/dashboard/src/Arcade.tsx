@@ -67,7 +67,8 @@ export function Arcade() {
   // Chips staked per round.
   const [bet, setBet] = useState(1);
   // In-flight withdraw (balance → on-chain UCT), polled until it lands.
-  const [cash, setCash] = useState<{ id: string; amount: number; status: 'pending' | 'landed' | 'failed'; txId?: string } | null>(null);
+  // 'slow' = still settling after our polling window — it arrives, we just stop watching.
+  const [cash, setCash] = useState<{ id: string; amount: number; status: 'pending' | 'landed' | 'failed' | 'slow'; txId?: string } | null>(null);
   // Wallet deposit (real UCT via the wallet's send-intent approval UI).
   const [depInfo, setDepInfo] = useState<DepositInfo | null>(null);
   const [depOpen, setDepOpen] = useState(false);
@@ -75,6 +76,8 @@ export function Arcade() {
   const [dep, setDep] = useState<{
     status: 'approving' | 'crediting' | 'done' | 'failed';
     amount: number;
+    /** Credited so far (deposits split into several tokens and trickle in). */
+    credited?: number;
     error?: string;
   } | null>(null);
   // Reveal pacing: `suspense` keeps the pending animation running before the
@@ -143,12 +146,22 @@ export function Arcade() {
     };
   }, [connected, applyBoard]);
 
-  // Keep the ticker + house panel fresh while the hall is open.
+  // Keep the ticker + house panel fresh while the hall is open, and sync the
+  // balance (late-arriving deposit tokens land silently in the background).
   useEffect(() => {
     if (!connected || ready !== true) return;
-    const t = setInterval(refreshBoard, 15_000);
+    const addr = wallet.identity ? addressOf(wallet.identity) : undefined;
+    const tick = () => {
+      refreshBoard();
+      if (addr) {
+        void fetchBalance(addr)
+          .then((b) => setYou((prev) => (prev && b.balanceUct !== prev.chips ? { ...prev, chips: b.balanceUct } : prev)))
+          .catch(() => {});
+      }
+    };
+    const t = setInterval(tick, 15_000);
     return () => clearInterval(t);
-  }, [connected, ready, refreshBoard]);
+  }, [connected, ready, refreshBoard, wallet.identity]);
 
   // Locked landing: tease the REAL floor behind the glass (live pot + payout
   // feed) — and warm the dealer up before the player even connects.
@@ -190,7 +203,9 @@ export function Arcade() {
     };
   }, [result, refreshBoard]);
 
-  // Poll an in-flight cash-out until the UCT transfer lands.
+  // Poll an in-flight withdraw until the UCT transfer lands. Sends can take a
+  // couple of minutes when the treasury tops itself up first — poll long, and
+  // if it is STILL settling afterwards, stop watching without blocking the UI.
   useEffect(() => {
     if (!cash || cash.status !== 'pending') return;
     let alive = true;
@@ -205,7 +220,7 @@ export function Arcade() {
           setCash({ ...cash, status: s.win.status, txId: s.win.txId });
           if (s.win.status === 'landed') sfx.cashout();
           if (s.win.status === 'failed') {
-            // the house put the chips back — mirror it locally
+            // the house put the balance back — mirror it locally
             setYou((prev) => (prev ? { ...prev, chips: prev.chips + cash.amount } : prev));
           }
           refreshBoard();
@@ -214,7 +229,11 @@ export function Arcade() {
       } catch {
         /* transient — keep polling */
       }
-      if (alive && tries < 25) timer = setTimeout(poll, 1300);
+      if (alive && tries < 60) {
+        timer = setTimeout(poll, 2000);
+      } else if (alive) {
+        setCash({ ...cash, status: 'slow' }); // frees the button; the transfer still lands
+      }
     };
     timer = setTimeout(poll, 800);
     return () => {
@@ -266,15 +285,24 @@ export function Arcade() {
     try {
       const amountBase = (BigInt(amount) * 10n ** BigInt(depInfo.decimals)).toString();
       await wallet.deposit({ to: depInfo.to, amountBase, coinId: depInfo.coinId });
-      setDep({ status: 'crediting', amount });
+      setDep({ status: 'crediting', amount, credited: 0 });
       const addr = addressOf(wallet.identity)!;
-      for (let i = 0; i < 45; i++) {
+      // A single send arrives as several tokens that trickle in — keep polling
+      // until the FULL amount is credited (or a generous window passes).
+      let credited = 0;
+      for (let i = 0; i < 90; i++) {
         await new Promise((r) => setTimeout(r, 2000));
         try {
           const b = await fetchBalance(addr);
-          if (b.balanceUct > baseline) {
+          const got = b.balanceUct - baseline;
+          if (got > credited) {
+            credited = got;
             setYou((prev) => (prev ? { ...prev, chips: b.balanceUct } : prev));
-            setDep({ status: 'done', amount: b.balanceUct - baseline });
+            setDep({ status: 'crediting', amount, credited });
+            sfx.bet();
+          }
+          if (got >= amount) {
+            setDep({ status: 'done', amount, credited: got });
             sfx.cashout();
             refreshBoard();
             return;
@@ -283,10 +311,16 @@ export function Arcade() {
           /* transient — keep polling */
         }
       }
+      // Window over: report honestly. Partial credits keep landing on their
+      // own — the background balance sync picks them up.
       setDep({
-        status: 'failed',
+        status: credited > 0 ? 'done' : 'failed',
         amount,
-        error: 'transfer approved — crediting is taking longer than usual, it will land shortly',
+        credited,
+        error:
+          credited > 0
+            ? `+${credited}/${amount} UCT credited — the rest is on its way and lands automatically`
+            : 'transfer approved — crediting is taking longer than usual, it will land shortly',
       });
     } catch (e) {
       setDep({ status: 'failed', amount, error: e instanceof Error ? e.message : 'wallet rejected the transfer' });
@@ -532,15 +566,17 @@ export function Arcade() {
             {dep?.status === 'approving'
               ? 'approve in your wallet…'
               : dep?.status === 'crediting'
-                ? 'crediting…'
+                ? `crediting ${dep.credited ?? 0}/${dep.amount}…`
                 : `deposit ${depAmt} UCT`}
           </button>
           <span className="depbar__note">
             {dep?.status === 'failed'
               ? dep.error
               : dep?.status === 'done'
-                ? `+${dep.amount} UCT credited ✓`
-                : 'your wallet opens and asks you to approve the transfer'}
+                ? (dep.error ?? `+${dep.credited ?? dep.amount} UCT credited ✓`)
+                : dep?.status === 'crediting'
+                  ? 'the transfer arrives as a few tokens — crediting each as it lands'
+                  : 'your wallet opens and asks you to approve the transfer'}
           </span>
         </div>
       )}
@@ -746,7 +782,7 @@ export function Arcade() {
         <div className="board">
           <div className="board__head">
             <span className="board__title">Leaderboard</span>
-            <span className="board__note">across all games · recent standings</span>
+            <span className="board__note">top players · all games</span>
           </div>
           {board.length === 0 ? (
             <div className="empty">No games yet — be the first to beat the house.</div>
@@ -781,20 +817,15 @@ function JackpotSign({ pot }: { pot: number | null }) {
     >
       <span className="jpot__bulbs jpot__bulbs--top" aria-hidden="true" />
       <span className="jpot__bulbs jpot__bulbs--bottom" aria-hidden="true" />
-      <span className="jpot__label">
-        progressive
-        <br />
-        jackpot
-      </span>
+      <span className="jpot__label">jackpot</span>
       <span className="jpot__amount">
         {pot ?? '…'}
         <em> UCT</em>
       </span>
       <span className="jpot__hint">
-        every round
+        every bet rolls for it
         <br />
-        rolls for it
-        <br />— any game
+        hit it, the agent pays the pot
       </span>
     </div>
   );
@@ -866,11 +897,10 @@ function HousePanel({
         <Stat value={`${stats.paidOutUct} UCT`} label="paid to players" />
         <Stat value={String(stats.roundsPlayed)} label="rounds dealt" />
         <Stat value={stats.jackpotUct != null ? `${stats.jackpotUct} UCT` : '…'} label="jackpot pot" />
-        <Stat value={`${stats.selfMintedUct} UCT`} label="self-funded" />
       </div>
       {stats.feed.length > 0 && (
         <div className="housep__feed">
-          {stats.feed.slice(0, 6).map((e, i) => (
+          {stats.feed.filter((e) => e.kind !== 'mint').slice(0, 6).map((e, i) => (
             <div
               className={`hevent${e.kind === 'mint' ? ' hevent--mint' : ''}${e.kind === 'jackpot' ? ' hevent--jackpot' : ''}`}
               key={`${e.at}-${i}`}
@@ -890,7 +920,7 @@ function HousePanel({
         </div>
       )}
       <div className="housep__note">
-        every number is real — payouts settled on testnet2 by the agent itself · recent totals
+        payouts settled on testnet2 by the agent itself · recent activity
       </div>
     </div>
   );
@@ -936,7 +966,7 @@ function EventsBar({
 }: {
   you: PlayerSnapshot | null;
   dailyDef: { goal: number; reward: number } | null;
-  cash: { id: string; amount: number; status: 'pending' | 'landed' | 'failed'; txId?: string } | null;
+  cash: { id: string; amount: number; status: 'pending' | 'landed' | 'failed' | 'slow'; txId?: string } | null;
   dep: { status: 'approving' | 'crediting' | 'done' | 'failed'; amount: number; error?: string } | null;
   onCashOut: () => void;
   onDeposit: () => void;
@@ -976,6 +1006,9 @@ function EventsBar({
           <div className="events__cash events__cash--ok" title={cash.txId}>
             ✓ {cash.amount} UCT sent on-chain
           </div>
+        )}
+        {cash?.status === 'slow' && (
+          <div className="events__cash">on its way — it lands in your wallet shortly</div>
         )}
         {cash?.status === 'failed' && (
           <div className="events__cash events__cash--bad">testnet hiccup — balance restored</div>
