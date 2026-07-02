@@ -1,0 +1,19 @@
+{
+  "name": "arcade-player",
+  "version": "0.1.0",
+  "description": "Astrid capsule: an autonomous player for Unicity Arcade House.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "node patch-sdk.mjs",
+    "build": "astrid-js-build . --out target/arcade-player.wasm",
+    "build:ts": "tsc"
+  },
+  "dependencies": {
+    "@unicity-astrid/sdk": "0.1.0"
+  },
+  "devDependencies": {
+    "@unicity-astrid/build": "0.1.0",
+    "typescript": "^5.6.0"
+  }
+}

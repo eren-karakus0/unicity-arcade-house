@@ -1,0 +1,42 @@
+[package]
+name = "arcade-player"
+version = "0.1.0"
+description = "An autonomous Astrid capsule that plays Unicity Arcade House: it bets against the house agent over HTTP and re-verifies every provably-fair reveal (commit hash, two-seed derivations, jackpot roll) before trusting a result."
+authors = ["eren-karakus0"]
+astrid-version = ">=0.5.0"
+
+[[component]]
+id = "arcade-player"
+file = "arcade-player.wasm"
+type = "executable"
+
+[capabilities]
+ipc_publish = ["tool.v1.execute.*", "cli.v1.command.result.*"]
+kv = ["*"]
+net = [
+  "sphere-agent-bazaar-backend.onrender.com",
+  "sphere-agent-bazaar-backend.onrender.com:443",
+]
+
+[[command]]
+name = "arcade"
+description = "Play Unicity Arcade House from the CLI: status | play [game] [bet] | session [rounds] [game] [bet]"
+kind = "cli"
+
+[[interceptor]]
+event = "cli.v1.command.run.arcade-player"
+action = "cli.run"
+
+[[tool]]
+name = "status"
+description_for_llm = "House status + this capsule's UCT balance at Unicity Arcade House (live testnet2 arcade run by an autonomous house agent)."
+
+[[tool]]
+name = "play"
+description_for_llm = "Play ONE provably-fair round at Unicity Arcade House with real testnet UCT and verify the reveal cryptographically. Args: game (rps|wheel|plinko|dice|coin|highlow|number, optional — random when omitted), bet (UCT, default 1)."
+mutable = true
+
+[[tool]]
+name = "session"
+description_for_llm = "Play an autonomous session of several provably-fair rounds at Unicity Arcade House and return a summary with fairness verification. Args: rounds (1-20, default 5), game (optional), bet (default 1)."
+mutable = true

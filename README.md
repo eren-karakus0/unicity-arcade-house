@@ -55,18 +55,31 @@ two — so neither side can steer the roll. The browser re-derives it to verify.
 On a win the house pays out from its treasury; the UI shows the real on-chain
 transfer id and its delivery state.
 
-## Under the hood
+## Under the hood — built exclusively on the Sphere SDK
 
-The house is a live **Sphere agent** — the same autonomous-agent infrastructure
-this repo is built on (`@bazaar/core` wraps a single Sphere v2 wallet: identity,
-self-mint, send/receive, on-chain settlement). The backend runs the house agent
-on testnet2 and exposes it to the web app.
+Every on-chain and identity operation in this project goes through
+**`@unicitylabs/sphere-sdk`** — no other web3 library is used anywhere:
 
-| Primitive | Used for |
+| Sphere SDK surface | Used for |
 |-----------|----------|
 | **nametag** | the house's on-network identity |
-| **payments (mint/send)** | funding the treasury and paying winners on-chain |
-| **wallet connect** | the player's identity / login |
+| **payments — mint** | the agent self-funding its treasury |
+| **payments — send** | withdrawals + jackpots settled on-chain by the agent |
+| **payments — history** | detecting incoming player deposits (sender pubkey + memo) |
+| **Sphere Connect** | the player's wallet login **and** the deposit approval flow (`send` intent — the wallet's own UI signs the transfer) |
+
+The house is a live **Sphere agent**: `@bazaar/core` wraps a single Sphere v2
+wallet (the documented two-step provider wiring) and the backend runs it on
+testnet2. Game logic (commit-reveal fairness, the dealer, the jackpot) is plain
+application code on top — the money never moves outside the SDK.
+
+### Astrid OS
+
+The repo also ships an **Astrid OS capsule** ([`capsules/arcade-player/`](capsules/arcade-player/))
+— an autonomous player agent on Astrid's WASM microkernel that bets real UCT
+against the house and re-verifies every reveal inside the sandbox. Proven on
+kernel v0.9.0; see [`docs/ASTRID.md`](docs/ASTRID.md) and the execution log in
+[`capsules/arcade-player/PROOF.log`](capsules/arcade-player/PROOF.log).
 
 ## Monorepo layout
 
@@ -76,6 +89,8 @@ on testnet2 and exposes it to the web app.
 │   │                    #   (arcade/: provably-fair games + GameDealer)
 │   ├── backend/         # runs the house agent + /api/arcade endpoints
 │   └── dashboard/       # the Arcade House web app (React + Vite)
+├── capsules/
+│   └── arcade-player/   # Astrid OS capsule: an agent that plays the arcade
 ```
 
 ## Getting started

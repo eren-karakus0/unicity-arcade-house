@@ -13,19 +13,21 @@ Everything needed to submit **Unicity Arcade House** to the Unicity
 | **Live app** | https://unicity-arcade-house.vercel.app/ |
 | **Network** | Unicity testnet2 |
 | **Agentic?** | **Yes** |
-| **Runs on AstridOS?** | No |
+| **Runs on AstridOS?** | **Yes** — an autonomous player capsule, proven on kernel v0.9.0 ([docs/ASTRID.md](ASTRID.md)) |
 
 ## One-paragraph description
 
-Unicity Arcade House is a hall of **provably-fair games** played against an
-**autonomous house** — a Sphere agent running on Unicity testnet2. You connect
-your Unicity wallet (that is your login), pick a game (rock-paper-scissors, dice
-duel, coin flip, high-low, lucky number), and play. Every game commits
-`sha256(secret : nonce)` before you act, so the reveal can be verified in your
-browser and the house cannot change its move after seeing yours. When you win,
-the house agent pays you real testnet UCT **on-chain by itself** — no human
-presses "pay". A win-streak and daily-challenge layer adds engagement bonuses,
-also paid out on-chain.
+Unicity Arcade House is a hall of seven **provably-fair games** played for
+**real testnet UCT** against an **autonomous house** — a Sphere agent on
+testnet2. Your wallet is your login; you buy in with a wallet-approved Sphere
+Connect transfer (the house detects the incoming payment and credits you),
+bet any amount across rock-paper-scissors, lucky wheel, plinko, dice duel,
+coin flip, high-low and lucky number, and withdraw on-chain any time — the
+agent sends the transfer itself, no human in the loop. Every round commits
+`sha256(secret : nonce)` before you act and the browser re-verifies the
+reveal; a progressive jackpot (also verifiable) can hit on any bet. An
+**Astrid OS capsule** plays the same floor autonomously — agents betting
+against agents.
 
 ## Why it is agentic
 
@@ -38,12 +40,16 @@ the house side is agent-initiated and verifiable.
 
 ## Depth of SDK use
 
+Everything on-chain goes through `@unicitylabs/sphere-sdk` — **no other
+web3 library is used anywhere in the repo**.
+
 | Primitive | Where |
 |-----------|-------|
 | **nametag** | the house's on-network identity |
-| **wallet connect** | the player's identity / login (Sphere Connect) |
+| **wallet connect** | player login + deposit approval (Sphere Connect `send` intent — the wallet's own UI signs) |
 | **payments — mint** | the house self-funds its prize treasury |
-| **payments — send** | on-chain payouts to winners (transfer id + delivery state surfaced in the UI) |
+| **payments — send** | withdrawals + jackpot payouts, settled by the agent (transfer id + delivery state in the UI) |
+| **payments — history** | crediting incoming deposits by sender pubkey/nametag |
 
 The house is built on the same autonomous-agent infrastructure as the rest of
 the repo (`@bazaar/core` wraps a single Sphere v2 wallet with the two-step
