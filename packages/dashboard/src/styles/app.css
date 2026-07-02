@@ -36,12 +36,28 @@
 
 /* ---------------- Header ---------------- */
 .hdr {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 18px;
   padding-bottom: 18px;
   border-bottom: 1px solid var(--border);
   animation: rise 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+/* a thin orange light that patrols the header rule */
+.hdr::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  width: 130px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: hdr-scan 9s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+@keyframes hdr-scan {
+  to { transform: translateX(calc(min(1500px, 100vw) - 210px)); }
 }
 .hdr__mark {
   width: 44px;
@@ -53,7 +69,9 @@
   display: grid;
   place-items: center;
   flex-shrink: 0;
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+.hdr__mark:hover { transform: rotate(180deg); }
 .hdr__titles {
   display: flex;
   flex-direction: column;
@@ -83,11 +101,17 @@
   align-items: center;
   gap: 18px;
 }
-.hdr__clock {
+.hdr__net {
   font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text-secondary);
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--border-focus);
+  border-radius: 999px;
+  padding: 4px 11px;
+  background: rgba(255, 111, 0, 0.06);
+  white-space: nowrap;
 }
 
 /* footer */
@@ -495,6 +519,24 @@
   flex-direction: column;
   gap: 18px;
   align-items: center;
+}
+/* arcade-cabinet corner brackets */
+.table::before {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  pointer-events: none;
+  opacity: 0.55;
+  background:
+    linear-gradient(var(--accent), var(--accent)) left 0 top 0 / 14px 2px,
+    linear-gradient(var(--accent), var(--accent)) left 0 top 0 / 2px 14px,
+    linear-gradient(var(--accent), var(--accent)) right 0 top 0 / 14px 2px,
+    linear-gradient(var(--accent), var(--accent)) right 0 top 0 / 2px 14px,
+    linear-gradient(var(--accent), var(--accent)) left 0 bottom 0 / 14px 2px,
+    linear-gradient(var(--accent), var(--accent)) left 0 bottom 0 / 2px 14px,
+    linear-gradient(var(--accent), var(--accent)) right 0 bottom 0 / 14px 2px,
+    linear-gradient(var(--accent), var(--accent)) right 0 bottom 0 / 2px 14px;
+  background-repeat: no-repeat;
 }
 .table__head { text-align: center; }
 .table__title {
@@ -927,7 +969,8 @@
   .gcard:hover .gcard__art,
   .wheel--idle,
   .wheel--spin,
-  .ticker__track {
+  .ticker__track,
+  .hdr::after {
     animation: none !important;
   }
   .wheel--land {

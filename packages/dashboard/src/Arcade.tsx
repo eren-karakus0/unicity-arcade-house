@@ -490,7 +490,7 @@ function Stat({ value, label }: { value: string; label: string }) {
 function Hero({ house }: { house: string | null }) {
   return (
     <div className="arcade__hero">
-      <h2 className="arcade__title">Agent Arcade</h2>
+      <h2 className="arcade__title">The Game Hall</h2>
       <p className="arcade__lede">
         A hall of provably-fair games vs an autonomous house. Win and it pays you real testnet UCT
         on-chain — automatically, no human in the loop.

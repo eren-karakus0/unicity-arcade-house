@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { Arcade } from './Arcade';
 import { ConnectWallet } from './ConnectWallet';
 import { Die } from './arcade/art';
@@ -14,11 +13,6 @@ export function App() {
 }
 
 function Header() {
-  const [clock, setClock] = useState(() => new Date().toISOString().slice(11, 19));
-  useEffect(() => {
-    const t = setInterval(() => setClock(new Date().toISOString().slice(11, 19)), 1000);
-    return () => clearInterval(t);
-  }, []);
   return (
     <header className="hdr">
       <div className="hdr__mark">
@@ -28,10 +22,10 @@ function Header() {
         <div className="hdr__title">
           Unicity <em>Arcade House</em>
         </div>
-        <div className="hdr__sub">Provably-fair games · Unicity testnet2</div>
+        <div className="hdr__sub">Provably-fair games · on-chain payouts</div>
       </div>
       <div className="hdr__right">
-        <span className="hdr__clock">{clock} UTC</span>
+        <span className="hdr__net">testnet2</span>
         <ConnectWallet />
       </div>
     </header>
