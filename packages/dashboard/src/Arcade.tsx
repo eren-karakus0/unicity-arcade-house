@@ -8,6 +8,8 @@ import {
   playRound,
   verifyCommit,
   verifyDice,
+  verifyJackpot,
+  verifyPlinko,
   verifyWheel,
   type GameMeta,
   type HouseEvent,
@@ -49,6 +51,7 @@ export function Arcade() {
   const [games, setGames] = useState<GameMeta[]>(GAMES_META);
   const [house, setHouse] = useState<string | null>(null);
   const [houseStats, setHouseStats] = useState<HouseStats | null>(null);
+  const [pot, setPot] = useState<number | null>(null);
   const [baseReward, setBaseReward] = useState(1);
   const [you, setYou] = useState<PlayerSnapshot | null>(null);
   const [dailyDef, setDailyDef] = useState<{ goal: number; reward: number } | null>(null);
@@ -68,7 +71,10 @@ export function Arcade() {
     if (b.baseRewardUct) setBaseReward(b.baseRewardUct);
     if (b.games?.length) setGames(b.games);
     if (b.daily) setDailyDef(b.daily);
-    if (b.houseStats) setHouseStats(b.houseStats);
+    if (b.houseStats) {
+      setHouseStats(b.houseStats);
+      if (b.houseStats.jackpotUct != null) setPot(b.houseStats.jackpotUct);
+    }
   }, []);
 
   const refreshBoard = useCallback(() => {
@@ -121,6 +127,7 @@ export function Arcade() {
         setRound(r);
         setHouse(r.house);
         if (r.you) setYou(r.you);
+        if (r.jackpotUct != null) setPot(r.jackpotUct);
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Could not start a round.';
         if (/timed out|waking up|failed to fetch|load failed/i.test(msg)) setReady(false);
@@ -185,6 +192,18 @@ export function Arcade() {
             segmentCount: segs?.length ?? 10,
           });
         }
+        if (ok && res.game === 'plinko') {
+          ok = await verifyPlinko(res.secret, String(res.reveal.clientSeed), {
+            path: res.reveal.path as number[],
+            bucketIndex: Number(res.reveal.bucketIndex),
+          });
+        }
+        if (ok && res.jackpot) {
+          ok = await verifyJackpot(res.secret, res.jackpot.input, {
+            roll: res.jackpot.roll,
+            threshold: res.jackpot.threshold,
+          });
+        }
         setVerified(ok);
       })();
       refreshBoard();
@@ -235,6 +254,14 @@ export function Arcade() {
 
       <EventsBar you={you} dailyDef={dailyDef} />
 
+      {pot != null && (
+        <div className="jpot" title="Grows every round; a provably-fair roll can hit it in any game — the house agent pays the whole pot on-chain.">
+          <span className="jpot__label">progressive jackpot</span>
+          <span className="jpot__amount">{pot} UCT</span>
+          <span className="jpot__hint">every round rolls for it — any game</span>
+        </div>
+      )}
+
       <HouseTicker feed={houseStats?.feed ?? []} games={games} />
 
       <div className="picker">
@@ -261,7 +288,9 @@ export function Arcade() {
       </div>
 
       <div className="table">
-        {outcome === 'win' && !settling && <WinBurst key={result!.nonce} />}
+        {(outcome === 'win' || result?.jackpot?.hit) && !settling && (
+          <WinBurst key={result!.nonce} big={result?.jackpot?.hit} />
+        )}
         <div className="table__head">
           <span className="table__title">{meta.title}</span>
           <span className="table__blurb">{meta.blurb}</span>
@@ -325,6 +354,17 @@ export function Arcade() {
           </>
         ) : (
           <div className="outcome">
+            {result.jackpot?.hit && (
+              <div className="jackpotwin">
+                <div className="jackpotwin__title">JACKPOT</div>
+                <div className="jackpotwin__amount">+{result.jackpot.potUct} UCT</div>
+                <div className="jackpotwin__pay">
+                  {result.jackpot.paid
+                    ? 'the whole pot — sent to your wallet by the house agent'
+                    : 'pot payout hit a testnet hiccup'}
+                </div>
+              </div>
+            )}
             <div className={`gverdict verdict--${outcome}`}>
               {outcome === 'win' ? `YOU WON +${result.rewardUct} UCT` : outcome === 'lose' ? 'YOU LOST' : 'PUSH'}
             </div>
@@ -413,12 +453,18 @@ const gameTitle = (games: GameMeta[], id?: string) => games.find((g) => g.id ===
 
 /** Scrolling strip of real recent payouts from the house feed. */
 function HouseTicker({ feed, games }: { feed: HouseEvent[]; games: GameMeta[] }) {
-  const wins = feed.filter((e) => e.kind === 'win').slice(0, 8);
+  const wins = feed.filter((e) => e.kind === 'win' || e.kind === 'jackpot').slice(0, 8);
   if (wins.length === 0) return null;
   const items = (dup: boolean) =>
     wins.map((w, i) => (
-      <span className="ticker__item" key={`${dup ? 'd' : 'a'}${i}`} aria-hidden={dup}>
-        <strong>@{w.name}</strong> won {w.amountUct} UCT on {gameTitle(games, w.game)}
+      <span
+        className={`ticker__item${w.kind === 'jackpot' ? ' ticker__item--jackpot' : ''}`}
+        key={`${dup ? 'd' : 'a'}${i}`}
+        aria-hidden={dup}
+      >
+        <strong>@{w.name}</strong>{' '}
+        {w.kind === 'jackpot' ? `HIT THE ${w.amountUct} UCT JACKPOT` : `won ${w.amountUct} UCT`} on{' '}
+        {gameTitle(games, w.game)}
         <em> · {timeAgo(w.at)}</em>
       </span>
     ));
@@ -462,11 +508,16 @@ function HousePanel({
       {stats.feed.length > 0 && (
         <div className="housep__feed">
           {stats.feed.slice(0, 6).map((e, i) => (
-            <div className={`hevent${e.kind === 'mint' ? ' hevent--mint' : ''}`} key={`${e.at}-${i}`}>
+            <div
+              className={`hevent${e.kind === 'mint' ? ' hevent--mint' : ''}${e.kind === 'jackpot' ? ' hevent--jackpot' : ''}`}
+              key={`${e.at}-${i}`}
+            >
               <span>
                 {e.kind === 'mint'
                   ? `treasury low — the agent minted itself +${e.amountUct} UCT`
-                  : `paid @${e.name} +${e.amountUct} UCT · ${gameTitle(games, e.game)}`}
+                  : e.kind === 'jackpot'
+                    ? `JACKPOT — paid @${e.name} the whole ${e.amountUct} UCT pot · ${gameTitle(games, e.game)}`
+                    : `paid @${e.name} +${e.amountUct} UCT · ${gameTitle(games, e.game)}`}
               </span>
               <span className="hevent__t">{timeAgo(e.at)}</span>
             </div>

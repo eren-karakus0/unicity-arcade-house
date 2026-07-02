@@ -243,6 +243,29 @@ export function WheelFace({ segments = DEFAULT_WHEEL, size = 64 }: { segments?: 
   );
 }
 
+export function PlinkoMark({ size = 64 }: { size?: number }) {
+  const pegs: [number, number][] = [
+    [32, 26],
+    [24, 34],
+    [40, 34],
+    [16, 42],
+    [32, 42],
+    [48, 42],
+  ];
+  return (
+    <Svg size={size} label="plinko">
+      <circle cx="32" cy="13" r="5.5" fill={O} />
+      <circle cx="30" cy="11" r="1.8" fill="#FFD9A8" />
+      {pegs.map(([x, y], i) => (
+        <circle key={i} cx={x} cy={y} r="2.6" fill={FACE} opacity="0.75" />
+      ))}
+      <rect x="9" y="50" width="13" height="9" rx="2.5" fill={O2} />
+      <rect x="25.5" y="50" width="13" height="9" rx="2.5" fill="#1d1d1d" stroke={FACE} strokeOpacity="0.2" />
+      <rect x="42" y="50" width="13" height="9" rx="2.5" fill={O2} />
+    </Svg>
+  );
+}
+
 export function HandOf({ move, size = 64 }: { move?: string; size?: number }) {
   if (move === 'rock') return <HandRock size={size} />;
   if (move === 'paper') return <HandPaper size={size} />;

@@ -826,6 +826,92 @@
   z-index: 2;
 }
 
+/* progressive jackpot bar */
+.jpot {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 10px 16px;
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-md);
+  background:
+    radial-gradient(120% 160% at 50% 0%, rgba(255, 111, 0, 0.12), transparent 60%),
+    rgba(0, 0, 0, 0.3);
+  animation: jpot-glow 2.6s ease-in-out infinite;
+}
+@keyframes jpot-glow {
+  0%, 100% { box-shadow: 0 0 0 rgba(255, 111, 0, 0); }
+  50% { box-shadow: 0 0 18px rgba(255, 111, 0, 0.14); }
+}
+.jpot__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.jpot__amount {
+  font-family: var(--font-display);
+  font-size: 24px;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  text-shadow: 0 0 14px rgba(255, 111, 0, 0.35);
+}
+.jpot__hint {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .jpot__hint { display: none; }
+}
+
+/* jackpot hit banner */
+.jackpotwin {
+  text-align: center;
+  padding: 12px 26px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background:
+    radial-gradient(130% 170% at 50% 0%, rgba(255, 111, 0, 0.2), transparent 65%),
+    rgba(0, 0, 0, 0.35);
+  animation: jackpotwin-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both, jpot-glow 1.2s ease-in-out 0.6s 4;
+}
+@keyframes jackpotwin-in {
+  0% { transform: scale(0.4) rotate(-3deg); opacity: 0; }
+  70% { transform: scale(1.08) rotate(1deg); }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+.jackpotwin__title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: 0.35em;
+  color: #ffd9a8;
+}
+.jackpotwin__amount {
+  font-family: var(--font-display);
+  font-size: clamp(28px, 6vw, 42px);
+  color: var(--accent);
+  text-shadow: 0 0 22px rgba(255, 111, 0, 0.5);
+  line-height: 1.1;
+}
+.jackpotwin__pay {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* plinko */
+.plinko__ball--wait { animation: plinko-wait 0.8s ease-in-out infinite; }
+@keyframes plinko-wait {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -6px; }
+}
+.plinko__bucket--hit rect { filter: drop-shadow(0 0 8px rgba(255, 111, 0, 0.8)); }
+
 /* live-wins ticker — real payouts from the house feed */
 .ticker {
   display: flex;
@@ -865,6 +951,7 @@
 }
 .ticker__item strong { color: var(--accent); font-weight: 600; }
 .ticker__item em { font-style: normal; color: var(--text-muted); }
+.ticker__item--jackpot { color: #ffd9a8; text-shadow: 0 0 10px rgba(255, 111, 0, 0.35); }
 
 /* the house — live transparency panel */
 .housep {
@@ -933,6 +1020,11 @@
   background: rgba(255, 111, 0, 0.07);
   border: 1px solid var(--border-focus);
 }
+.hevent--jackpot {
+  color: #ffd9a8;
+  background: rgba(255, 111, 0, 0.12);
+  border: 1px solid var(--accent);
+}
 .hevent__t { color: var(--text-faint); white-space: nowrap; }
 .housep__note {
   font-family: var(--font-mono);
@@ -970,7 +1062,10 @@
   .wheel--idle,
   .wheel--spin,
   .ticker__track,
-  .hdr::after {
+  .hdr::after,
+  .jpot,
+  .jackpotwin,
+  .plinko__ball--wait {
     animation: none !important;
   }
   .wheel--land {

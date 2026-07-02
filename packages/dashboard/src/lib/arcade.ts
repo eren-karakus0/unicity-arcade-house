@@ -33,8 +33,21 @@ export interface NewRound {
   commit: string;
   rewardUct: number;
   house: string;
+  jackpotUct?: number;
   publicState?: Record<string, unknown>;
   you?: PlayerSnapshot;
+}
+
+export interface JackpotResult {
+  roll: number;
+  threshold: number;
+  hit: boolean;
+  potUct: number;
+  input: string;
+  paid?: boolean;
+  txId?: string;
+  delivery?: string;
+  error?: string;
 }
 
 export interface PlayResult {
@@ -56,6 +69,7 @@ export interface PlayResult {
   streakBonus: number;
   dailyBonus: number;
   daily: DailyView;
+  jackpot?: JackpotResult;
 }
 
 export interface LeaderRow {
@@ -68,7 +82,7 @@ export interface LeaderRow {
 }
 
 export interface HouseEvent {
-  kind: 'win' | 'mint';
+  kind: 'win' | 'mint' | 'jackpot';
   at: number;
   amountUct: number;
   name?: string;
@@ -81,6 +95,7 @@ export interface HouseStats {
   roundsPlayed: number;
   winsPaid: number;
   selfMintedUct: number;
+  jackpotUct?: number;
   feed: HouseEvent[];
 }
 
@@ -152,6 +167,30 @@ export async function verifyDice(
   const house = (parseInt(h.slice(0, 8), 16) % 6) + 1;
   const player = (parseInt(h.slice(8, 16), 16) % 6) + 1;
   return house === expected.dealerRoll && player === expected.playerRoll;
+}
+
+/** Recompute the Plinko path bits from the two seeds — mirrors the server's derivePlinkoPath. */
+export async function verifyPlinko(
+  server: string,
+  client: string,
+  expected: { path: number[]; bucketIndex: number },
+): Promise<boolean> {
+  const h = await sha256Hex(`${server}:${client}`);
+  const path = Array.from({ length: expected.path.length }, (_, i) => parseInt(h[i]!, 16) & 1);
+  return (
+    path.every((bit, i) => bit === expected.path[i]) &&
+    path.reduce((a, b) => a + b, 0) === expected.bucketIndex
+  );
+}
+
+/** Recompute the jackpot roll — mirrors the server's deriveJackpotRoll. */
+export async function verifyJackpot(
+  secret: string,
+  input: string,
+  expected: { roll: number; threshold: number },
+): Promise<boolean> {
+  const h = await sha256Hex(`${secret}:jackpot:${input}`);
+  return parseInt(h.slice(0, 6), 16) % expected.threshold === expected.roll;
 }
 
 /** Recompute the wheel landing from the two seeds — mirrors the server's deriveWheelIndex. */

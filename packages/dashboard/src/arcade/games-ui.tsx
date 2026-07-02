@@ -11,13 +11,15 @@ import {
   HandRock,
   HandScissors,
   NumberTile,
+  PlinkoMark,
   WheelFace,
 } from './art';
-import { CyclingTile, TumblingDie, WheelFx } from './fx';
+import { CyclingTile, PlinkoFx, TumblingDie, WheelFx } from './fx';
 
 export const GAMES_META: GameMeta[] = [
   { id: 'rps', title: 'Rock · Paper · Scissors', blurb: 'Beat the house’s sealed move.', rewardMult: 1, inputKind: 'choice' },
   { id: 'wheel', title: 'Lucky Wheel', blurb: 'Spin — land a multiplier. ×5 jackpot, two-seed fair.', rewardMult: 5, inputKind: 'seed' },
+  { id: 'plinko', title: 'Plinko', blurb: 'Drop the ball — edge buckets pay ×10. Two-seed fair.', rewardMult: 10, inputKind: 'seed' },
   { id: 'dice', title: 'Dice Duel', blurb: 'Higher roll wins — two-seed fair.', rewardMult: 1, inputKind: 'seed' },
   { id: 'coin', title: 'Coin Flip', blurb: 'Call it. Pure 50 / 50.', rewardMult: 1, inputKind: 'choice' },
   { id: 'highlow', title: 'High · Low', blurb: 'Higher or lower than the card?', rewardMult: 1, inputKind: 'choice' },
@@ -155,6 +157,36 @@ export const GAME_UI: Record<string, GameUI> = {
     rollLabel: 'Spin the wheel',
     settleMs: 3100,
     reward: (base) => `win up to ${base * 5} UCT`,
+  },
+  plinko: {
+    Icon: ({ size }) => <PlinkoMark size={size} />,
+    Stage: ({ round, result, pending }) => {
+      const ps = round?.publicState as { rows?: number; multipliers?: number[] } | undefined;
+      const mults = (result?.reveal.multipliers ?? ps?.multipliers) as number[] | undefined;
+      return (
+        <Solo
+          caption={
+            pending
+              ? 'dropping…'
+              : result
+                ? `landed ×${str(result.reveal.multiplier)}`
+                : round
+                  ? 'drop when ready'
+                  : ''
+          }
+        >
+          <PlinkoFx
+            rows={ps?.rows ?? 12}
+            multipliers={mults}
+            path={result ? (result.reveal.path as number[]) : undefined}
+            dropping={pending}
+          />
+        </Solo>
+      );
+    },
+    rollLabel: 'Drop the ball',
+    settleMs: 2500,
+    reward: (base) => `win up to ${base * 10} UCT`,
   },
   dice: {
     Icon: ({ size }) => <Die n={5} size={size} />,

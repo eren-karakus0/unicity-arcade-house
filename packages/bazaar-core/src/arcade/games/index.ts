@@ -5,10 +5,30 @@ import { coinGame } from './coinflip-game.js';
 import { highlowGame } from './highlow-game.js';
 import { numberGame } from './numberguess-game.js';
 import { wheelGame, WHEEL_SEGMENTS } from './wheel-game.js';
+import { plinkoGame, PLINKO_MULTIPLIERS, PLINKO_ROWS } from './plinko-game.js';
 
 export * from './types.js';
-export { rpsGame, diceGame, coinGame, highlowGame, numberGame, wheelGame, WHEEL_SEGMENTS };
+export {
+  rpsGame,
+  diceGame,
+  coinGame,
+  highlowGame,
+  numberGame,
+  wheelGame,
+  plinkoGame,
+  WHEEL_SEGMENTS,
+  PLINKO_MULTIPLIERS,
+  PLINKO_ROWS,
+};
 
-export const GAME_LIST: readonly Game[] = [rpsGame, wheelGame, diceGame, coinGame, highlowGame, numberGame];
+export const GAME_LIST: readonly Game[] = [
+  rpsGame,
+  wheelGame,
+  plinkoGame,
+  diceGame,
+  coinGame,
+  highlowGame,
+  numberGame,
+];
 
 export const GAMES: Record<string, Game> = Object.fromEntries(GAME_LIST.map((g) => [g.id, g]));

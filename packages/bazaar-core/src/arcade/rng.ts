@@ -53,3 +53,22 @@ export function deriveWheelIndex(server: string, client: string, segmentCount: n
   const h = createHash('sha256').update(`${server}:${client}`).digest('hex');
   return parseInt(h.slice(0, 8), 16) % segmentCount;
 }
+
+/**
+ * Derive the Plinko ball's left/right decisions (one bit per peg row) from the
+ * committed server seed + the player's client seed. The landing bucket is the
+ * number of rights — reproducible in the browser bit for bit.
+ */
+export function derivePlinkoPath(server: string, client: string, rows: number): number[] {
+  const h = createHash('sha256').update(`${server}:${client}`).digest('hex');
+  return Array.from({ length: rows }, (_, i) => parseInt(h[i]!, 16) & 1);
+}
+
+/**
+ * The progressive-jackpot roll for a round: derived from the committed secret
+ * and the player's own input, so neither side can steer it. A roll of 0 hits.
+ */
+export function deriveJackpotRoll(secret: string, input: string, odds: number): number {
+  const h = createHash('sha256').update(`${secret}:jackpot:${input}`).digest('hex');
+  return parseInt(h.slice(0, 6), 16) % odds;
+}

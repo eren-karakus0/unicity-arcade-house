@@ -1,19 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { commitHash, deriveDicePair, deriveWheelIndex } from './rng.js';
+import { commitHash, deriveDicePair, deriveJackpotRoll, derivePlinkoPath, deriveWheelIndex } from './rng.js';
 import {
   GAMES,
+  PLINKO_MULTIPLIERS,
+  PLINKO_ROWS,
   WHEEL_SEGMENTS,
   coinGame,
   diceGame,
   highlowGame,
   numberGame,
+  plinkoGame,
   rpsGame,
   wheelGame,
 } from './games/index.js';
+import { GameDealer } from './game-dealer.js';
+import type { SphereAgent } from '../sphere-agent.js';
 
 describe('arcade game registry', () => {
-  it('registers all six games by id', () => {
-    expect(Object.keys(GAMES).sort()).toEqual(['coin', 'dice', 'highlow', 'number', 'rps', 'wheel']);
+  it('registers all seven games by id', () => {
+    expect(Object.keys(GAMES).sort()).toEqual(['coin', 'dice', 'highlow', 'number', 'plinko', 'rps', 'wheel']);
   });
 });
 
@@ -95,6 +100,89 @@ describe('lucky wheel (two-seed provably fair)', () => {
   });
   it('rejects a missing client seed', () => {
     expect(() => wheelGame.resolveInput('')).toThrow();
+  });
+});
+
+describe('plinko (two-seed provably fair)', () => {
+  it('derives the same path from the same seeds, one bit per row', () => {
+    const a = derivePlinkoPath('srv', 'cli', PLINKO_ROWS);
+    const b = derivePlinkoPath('srv', 'cli', PLINKO_ROWS);
+    expect(a).toEqual(b);
+    expect(a).toHaveLength(PLINKO_ROWS);
+    expect(a.every((bit) => bit === 0 || bit === 1)).toBe(true);
+  });
+  it('bucket = number of rights, pays the bucket multiplier', () => {
+    const path = derivePlinkoPath('deadbeef', 'player123', PLINKO_ROWS);
+    const bucket = path.reduce((x, y) => x + y, 0);
+    const r = plinkoGame.judge('deadbeef', 'player123');
+    expect(r.reveal.path).toEqual(path);
+    expect(r.reveal.bucketIndex).toBe(bucket);
+    expect(r.rewardMult).toBe(PLINKO_MULTIPLIERS[bucket]);
+    expect(r.outcome).toBe(PLINKO_MULTIPLIERS[bucket]! > 0 ? 'win' : 'lose');
+  });
+  it('publishes the board layout up front and has symmetric ×10 edges', () => {
+    const { publicState } = plinkoGame.deal();
+    expect(publicState?.rows).toBe(PLINKO_ROWS);
+    expect(publicState?.multipliers).toEqual([...PLINKO_MULTIPLIERS]);
+    expect(PLINKO_MULTIPLIERS[0]).toBe(10);
+    expect(PLINKO_MULTIPLIERS[PLINKO_MULTIPLIERS.length - 1]).toBe(10);
+    expect(PLINKO_MULTIPLIERS).toHaveLength(PLINKO_ROWS + 1);
+  });
+});
+
+describe('progressive jackpot', () => {
+  const stubAgent = (sent: { address: string; amount: number; memo?: string }[]) =>
+    ({
+      nametag: 'house-test',
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async (address: string, amount: number, memo?: string) => {
+        sent.push({ address, amount, memo });
+        return { id: `tx-${sent.length}`, deliveryState: 'landed' };
+      },
+    }) as unknown as SphereAgent;
+
+  it('roll is deterministic and inside the odds', () => {
+    const a = deriveJackpotRoll('sec', 'rock', 150);
+    expect(deriveJackpotRoll('sec', 'rock', 150)).toBe(a);
+    expect(a).toBeGreaterThanOrEqual(0);
+    expect(a).toBeLessThan(150);
+  });
+
+  it('pays the whole pot on a hit and resets it (odds=1 forces a hit)', async () => {
+    const sent: { address: string; amount: number; memo?: string }[] = [];
+    const dealer = new GameDealer({
+      agent: stubAgent(sent),
+      cooldownMs: 0,
+      jackpotSeedUct: 20,
+      jackpotOdds: 1, // every roll is 0 → always hits
+    });
+    const nr = dealer.newRound('coin', '@p1');
+    expect(nr.jackpotUct).toBe(20);
+    const res = await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@p1', name: 'p1' });
+    expect(res.jackpot.hit).toBe(true);
+    expect(res.jackpot.paid).toBe(true);
+    expect(res.jackpot.potUct).toBe(20);
+    expect(sent.some((s) => s.memo === 'arcade-jackpot' && s.amount === 20)).toBe(true);
+    const stats = await dealer.houseStats();
+    expect(stats.jackpotUct).toBe(20); // reset to seed
+    expect(stats.feed.some((e) => e.kind === 'jackpot')).toBe(true);
+  });
+
+  it('grows the pot (capped) when the roll misses', async () => {
+    const sent: { address: string; amount: number; memo?: string }[] = [];
+    const dealer = new GameDealer({
+      agent: stubAgent(sent),
+      cooldownMs: 0,
+      jackpotSeedUct: 20,
+      jackpotGrowthUct: 1,
+      jackpotOdds: 1_000_000_000, // a hit is (practically) impossible
+    });
+    const nr = dealer.newRound('coin', '@p1');
+    const res = await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@p1', name: 'p1' });
+    expect(res.jackpot.hit).toBe(false);
+    expect((await dealer.houseStats()).jackpotUct).toBe(21);
+    expect(sent.every((s) => s.memo !== 'arcade-jackpot')).toBe(true);
   });
 });
 

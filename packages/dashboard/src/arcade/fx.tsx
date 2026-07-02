@@ -76,6 +76,114 @@ export function WheelFx({
   );
 }
 
+/* ---- Plinko: the real revealed path drives the ball, peg by peg ---- */
+
+const P_O = '#FF6F00';
+const P_INK = '#0a0a0a';
+const P_DEFAULT_MULTS: readonly number[] = [10, 4, 2, 1, 1, 1, 0, 1, 1, 1, 2, 4, 10];
+
+export function PlinkoFx({
+  rows = 12,
+  multipliers,
+  path,
+  dropping,
+}: {
+  rows?: number;
+  multipliers?: readonly number[];
+  path?: number[];
+  dropping: boolean;
+}) {
+  const mults = multipliers ?? P_DEFAULT_MULTS;
+  const n = path?.length ?? rows;
+  const dx = 22;
+  const rowH = 19;
+  const top = 22;
+  const W = (n + 1) * dx + 26;
+  const cx = W / 2;
+  const bucketY = top + n * rowH + 6;
+  const H = bucketY + 36;
+
+  // Step the ball along the revealed path (one peg row per tick).
+  const [step, setStep] = useState(-1);
+  useEffect(() => {
+    if (!path) {
+      setStep(-1);
+      return;
+    }
+    setStep(0);
+    let k = 0;
+    const t = setInterval(() => {
+      k += 1;
+      setStep(k);
+      if (k > path.length) clearInterval(t);
+    }, 130);
+    return () => clearInterval(t);
+  }, [path]);
+
+  const k = path ? Math.min(Math.max(step, 0), path.length) : 0;
+  const rights = path ? path.slice(0, k).reduce((a, b) => a + b, 0) : 0;
+  const inBucket = !!path && step > path.length;
+  const ballX = path ? cx + (rights - k / 2) * dx : cx;
+  const ballY = !path ? top - 9 : inBucket ? bucketY + 13 : top - 9 + k * rowH;
+  const landed = inBucket && path ? path.reduce((a, b) => a + b, 0) : -1;
+
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} fill="none" role="img" aria-label="plinko board">
+      {/* pegs */}
+      {Array.from({ length: n }, (_, i) =>
+        Array.from({ length: i + 1 }, (_, j) => (
+          <circle
+            key={`${i}-${j}`}
+            cx={cx + (j - i / 2) * dx}
+            cy={top + i * rowH + rowH / 2}
+            r="2.4"
+            fill="#ffffff"
+            opacity="0.28"
+          />
+        )),
+      )}
+      {/* buckets */}
+      {mults.map((m, b) => {
+        const bx = cx + (b - n / 2) * dx;
+        const hot = b === landed;
+        return (
+          <g key={b} className={hot ? 'plinko__bucket--hit' : undefined}>
+            <rect
+              x={bx - dx / 2 + 1.5}
+              y={bucketY}
+              width={dx - 3}
+              height={25}
+              rx={4}
+              fill={m === 0 ? '#141414' : m >= 10 ? '#FFD9A8' : m >= 2 ? P_O : '#b34e00'}
+              stroke={hot ? '#ffffff' : P_INK}
+              strokeWidth={hot ? 2 : 1.5}
+            />
+            <text
+              x={bx}
+              y={bucketY + 16.5}
+              textAnchor="middle"
+              fontFamily="Geist Mono, monospace"
+              fontSize="9.5"
+              fontWeight="700"
+              fill={m === 0 ? 'rgba(255,255,255,0.35)' : m >= 10 ? P_INK : '#F3ECE1'}
+            >
+              {m ? `×${m}` : '·'}
+            </text>
+          </g>
+        );
+      })}
+      {/* the ball */}
+      <g
+        className={dropping && !path ? 'plinko__ball--wait' : undefined}
+        style={{ transform: `translate(${ballX}px, ${ballY}px)`, transition: 'transform 120ms ease-in' }}
+      >
+        <circle r="7" fill={P_O} stroke={P_INK} strokeWidth="2" />
+        <circle r="2.4" cx="-2" cy="-2.4" fill="#FFD9A8" />
+      </g>
+    </svg>
+  );
+}
+
 /* ---- win celebration: brand-orange coin rain + confetti, one shot ---- */
 
 const BITS = ['#FF6F00', '#FF9A4D', '#FFD9A8', '#F3ECE1'];
@@ -92,22 +200,22 @@ interface Particle {
   spin: number;
 }
 
-/** Mount with a fresh `key` per win so the burst replays. */
-export function WinBurst() {
+/** Mount with a fresh `key` per win so the burst replays. `big` = jackpot mode. */
+export function WinBurst({ big = false }: { big?: boolean }) {
   const parts = useMemo<Particle[]>(
     () =>
-      Array.from({ length: 28 }, (_, i) => ({
+      Array.from({ length: big ? 64 : 28 }, (_, i) => ({
         id: i,
         coin: i % 4 === 0,
         left: 3 + Math.random() * 94,
-        delay: Math.random() * 0.4,
-        dur: 1.2 + Math.random(),
+        delay: Math.random() * (big ? 0.9 : 0.4),
+        dur: 1.2 + Math.random() * (big ? 1.6 : 1),
         size: i % 4 === 0 ? 14 + Math.random() * 8 : 5 + Math.random() * 6,
         color: BITS[i % BITS.length]!,
         drift: -50 + Math.random() * 100,
         spin: (Math.random() < 0.5 ? -1 : 1) * (200 + Math.random() * 520),
       })),
-    [],
+    [big],
   );
   return (
     <div className="burst" aria-hidden="true">
