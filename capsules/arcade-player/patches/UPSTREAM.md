@@ -1,6 +1,6 @@
 # Upstream bug report — @unicity-astrid/sdk 0.1.0 (sdk-js)
 
-Ready to file as an issue/PR against `unicity-astrid/sdk-js`.
+Filed upstream: [unicity-astrid/sdk-js#20](https://github.com/unicity-astrid/sdk-js/issues/20) (2026-07-03).
 
 ## Title
 
