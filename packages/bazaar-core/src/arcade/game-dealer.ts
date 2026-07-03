@@ -21,6 +21,7 @@ import {
   type AchievementView,
 } from './achievements.js';
 import { Tournament, type TournamentView } from './tournament.js';
+import { referralCode, normalizeCode, REFERRAL_BONUS_UCT, REFERRAL_WELCOME_UCT } from './referral.js';
 
 export interface GameDealerOptions {
   /** The house wallet — pays winners and holds the prize treasury. */
@@ -125,6 +126,8 @@ export interface PlayResult {
   achievements: AchievementView[];
   /** UCT credited from those achievements' one-time rewards. */
   achievementBonus: number;
+  /** Set once, when this round applied a valid referral for a new player. */
+  referral?: { welcomeBonus: number };
 }
 
 /** Background on-chain payout state, pollable per round. */
@@ -227,6 +230,8 @@ export class GameDealer {
   private readonly settlements = new Map<string, Settlement>();
   private readonly inFlight = new Set<Promise<void>>();
   private readonly tourney: Tournament;
+  /** referral code → player key, so a referee's code resolves to the referrer. */
+  private readonly referralCodes = new Map<string, string>();
 
   constructor(opts: GameDealerOptions) {
     this.agent = opts.agent;
@@ -279,6 +284,7 @@ export class GameDealer {
     // One-time welcome stake so a fresh wallet can try the games; after this,
     // the balance moves only via deposits, bets, and withdrawals.
     const key = this.keyFor(playerAddress);
+    if (playerAddress) this.referralCodes.set(referralCode(key), key); // resolvable once seen
     const day = todayKey();
     const welcomed = welcomeGrant(this.players.get(key) ?? newPlayerState());
     this.players.set(key, welcomed.state);
@@ -314,6 +320,8 @@ export class GameDealer {
     bet?: unknown;
     playerAddress?: string;
     name?: string;
+    /** Referral code captured from the invite link, applied on the first play. */
+    ref?: unknown;
   }): Promise<PlayResult> {
     const round = this.rounds.get(input.roundId);
     if (!round) throw new Error('Round not found or already played — start a new one.');
@@ -409,6 +417,27 @@ export class GameDealer {
     if (judged.outcome === 'win') {
       this.tourney.record(key, name, input.playerAddress, reward - bet);
     }
+
+    // Referral: on this player's first play, credit both sides once. Guarded by
+    // referredBy so it never repeats; no self-referral; referrer must exist.
+    let referral: PlayResult['referral'];
+    const refCode = normalizeCode(input.ref);
+    if (refCode && state.referredBy === undefined) {
+      const referrerKey = this.referralCodes.get(refCode);
+      if (referrerKey && referrerKey !== key && this.players.has(referrerKey)) {
+        state = { ...state, referredBy: referrerKey, chips: state.chips + REFERRAL_WELCOME_UCT };
+        this.players.set(key, state);
+        const refState = this.players.get(referrerKey)!;
+        this.players.set(referrerKey, {
+          ...refState,
+          chips: refState.chips + REFERRAL_BONUS_UCT,
+          referrals: refState.referrals + 1,
+        });
+        referral = { welcomeBonus: REFERRAL_WELCOME_UCT };
+        this.log.info(`referral: @${name} joined via ${refCode} — +${REFERRAL_BONUS_UCT} UCT to the referrer`);
+      }
+    }
+
     const achievements: AchievementView[] = fresh.map((a) => ({
       id: a.id,
       title: a.title,
@@ -437,6 +466,21 @@ export class GameDealer {
       jackpot,
       achievements,
       achievementBonus,
+      ...(referral ? { referral } : {}),
+    };
+  }
+
+  /** This player's own invite code + how many friends they've brought in. */
+  referralInfo(address?: string): { code: string | null; referrals: number; referred: boolean } {
+    if (!address) return { code: null, referrals: 0, referred: false };
+    const key = this.keyFor(address);
+    const state = this.players.get(key);
+    // Make the code resolvable even before the first round is dealt.
+    this.referralCodes.set(referralCode(key), key);
+    return {
+      code: referralCode(key),
+      referrals: state?.referrals ?? 0,
+      referred: state?.referredBy !== undefined,
     };
   }
 

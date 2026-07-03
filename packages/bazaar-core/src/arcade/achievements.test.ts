@@ -19,6 +19,7 @@ const base: ProgressStats = {
   biggestWin: 0,
   totalWon: 0,
   everDaily: false,
+  referrals: 0,
 };
 
 describe('achievements catalog', () => {
@@ -54,6 +55,7 @@ describe('achievements catalog', () => {
     expect(earnedIds({ ...base, plays: 50 })).toContain('veteran');
     expect(earnedIds({ ...base, jackpots: 1 })).toContain('jackpot');
     expect(earnedIds({ ...base, everDaily: true })).toContain('daily_done');
+    expect(earnedIds({ ...base, referrals: 1 })).toContain('recruiter');
   });
 });
 

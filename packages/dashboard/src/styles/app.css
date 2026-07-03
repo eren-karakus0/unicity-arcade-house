@@ -1640,6 +1640,115 @@
   color: var(--risk-low);
 }
 
+/* ------------------------------------------------------------------ */
+/* invite / referral                                                    */
+/* ------------------------------------------------------------------ */
+.invite {
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  padding: 18px 20px 20px;
+}
+.invite__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.invite__title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.invite__count {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--risk-low);
+  border: 1px solid rgba(61, 220, 151, 0.35);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.invite__blurb {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.invite__blurb strong {
+  color: var(--accent);
+}
+.invite__row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.invite__link {
+  flex: 1 1 240px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+}
+.invite__btn {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--brand-black);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 0 16px;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.invite__btn:hover {
+  filter: brightness(1.15);
+}
+.invite__coderow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.invite__codelabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.invite__code {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  letter-spacing: 0.22em;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(255, 111, 0, 0.06);
+  border: 1px dashed var(--border-focus);
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.invite__code:hover {
+  background: rgba(255, 111, 0, 0.12);
+}
+
 /* one-time unlock toast */
 .achtoast {
   position: fixed;

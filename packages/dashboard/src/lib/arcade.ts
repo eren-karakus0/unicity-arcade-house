@@ -86,6 +86,8 @@ export interface PlayResult {
   achievements?: AchievementView[];
   /** UCT credited from those achievements' one-time rewards. */
   achievementBonus?: number;
+  /** Set once, when this round applied a valid referral for a new player. */
+  referral?: { welcomeBonus: number };
 }
 
 export interface LeaderRow {
@@ -158,6 +160,7 @@ export function playRound(input: {
   bet: number;
   address?: string;
   name?: string;
+  ref?: string;
 }): Promise<PlayResult> {
   return post<PlayResult>('/api/arcade/play', {
     roundId: input.roundId,
@@ -165,6 +168,7 @@ export function playRound(input: {
     bet: input.bet,
     address: input.address,
     name: input.name,
+    ref: input.ref,
   });
 }
 
@@ -211,6 +215,56 @@ export interface TournamentView {
 export async function fetchTournament(): Promise<TournamentView> {
   const r = await fetch(`${BACKEND_URL}/api/arcade/tournament`, { signal: AbortSignal.timeout(8_000) });
   return (await r.json()) as TournamentView;
+}
+
+export interface ReferralInfo {
+  code: string | null;
+  referrals: number;
+  referred: boolean;
+}
+
+/** The caller's invite code + how many friends they've brought in. */
+export async function fetchReferral(address?: string): Promise<ReferralInfo> {
+  const q = address ? `?address=${encodeURIComponent(address)}` : '';
+  const r = await fetch(`${BACKEND_URL}/api/arcade/referral${q}`, { signal: AbortSignal.timeout(8_000) });
+  return (await r.json()) as ReferralInfo;
+}
+
+const REF_KEY = 'arcade:ref';
+
+/** Capture a `?ref=CODE` invite from the URL into storage (once), then clean it. */
+export function captureRef(): void {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('ref');
+    if (code && /^[0-9A-Za-z]{4,8}$/.test(code)) {
+      if (!localStorage.getItem(REF_KEY)) localStorage.setItem(REF_KEY, code.toUpperCase());
+      params.delete('ref');
+      const qs = params.toString();
+      const url = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+      window.history.replaceState(null, '', url);
+    }
+  } catch {
+    /* storage/history unavailable — no invite captured */
+  }
+}
+
+/** The pending invite code (used on the first play), if any. */
+export function pendingRef(): string | undefined {
+  try {
+    return localStorage.getItem(REF_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Clear the pending invite once it's been applied. */
+export function clearRef(): void {
+  try {
+    localStorage.removeItem(REF_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function fetchLeaderboard(): Promise<Leaderboard> {

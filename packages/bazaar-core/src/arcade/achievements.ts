@@ -28,6 +28,7 @@ export interface ProgressStats {
   biggestWin: number;
   totalWon: number;
   everDaily: boolean;
+  referrals: number;
 }
 
 /** Total number of distinct games in the arcade (for the "explorer" badge). */
@@ -118,6 +119,14 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
     reward: 0, // the pot itself is the reward
     test: (p) => p.jackpots >= 1,
   },
+  {
+    id: 'recruiter',
+    title: 'Recruiter',
+    detail: 'Refer a friend to the house.',
+    icon: 'spark',
+    reward: 0, // the referral bonus is paid separately
+    test: (p) => p.referrals >= 1,
+  },
 ] as const;
 
 const BY_ID = new Map(ACHIEVEMENTS.map((a) => [a.id, a]));
@@ -133,6 +142,7 @@ export function statsOf(p: PlayerState): ProgressStats {
     biggestWin: p.biggestWin,
     totalWon: p.totalWon,
     everDaily: p.everDaily,
+    referrals: p.referrals,
   };
 }
 

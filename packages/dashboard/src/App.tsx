@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Arcade } from './Arcade';
 import { ConnectWallet } from './ConnectWallet';
 import { Fairness } from './Fairness';
+import { captureRef } from './lib/arcade';
 import { Card, Coin, Die, HandScissors, PlinkoMark } from './arcade/art';
 import { isMuted, setMuted, sfx } from './arcade/sound';
 
@@ -21,6 +22,7 @@ function useRoute(): string {
 
 export function App() {
   const route = useRoute();
+  useEffect(() => captureRef(), []); // grab a ?ref= invite before anything else
   return (
     <div className="app">
       <WallArt />

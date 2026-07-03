@@ -419,3 +419,54 @@ describe('tournament — dealer wiring', () => {
     expect(stats.feed.some((e) => e.kind === 'tournament')).toBe(true);
   });
 });
+
+describe('referral — dealer wiring', () => {
+  const stubAgent = () =>
+    ({
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async () => ({ id: 'tx', deliveryState: 'landed' }),
+    }) as unknown as SphereAgent;
+
+  const firstPlay = async (dealer: GameDealer, addr: string, name: string, ref?: string) => {
+    const nr = dealer.newRound('coin', addr);
+    return dealer.play({ roundId: nr.roundId, choice: 'heads', bet: 1, playerAddress: addr, name, ...(ref ? { ref } : {}) });
+  };
+
+  it('gives a stable, resolvable code and credits both sides once', async () => {
+    const dealer = new GameDealer({ agent: stubAgent(), cooldownMs: 0, jackpotOdds: 1_000_000_000 });
+    // Referrer must be seen first so their code resolves.
+    dealer.newRound('coin', '@ref1');
+    const code = dealer.referralInfo('@ref1').code!;
+    expect(code).toMatch(/^[0-9A-Z]{6}$/);
+
+    const before = dealer.balanceOf('@ref1').balanceUct; // welcome 5
+    const res = await firstPlay(dealer, '@newbie', 'newbie', code);
+    expect(res.referral?.welcomeBonus).toBe(2);
+    // referee: welcome 5 + referral welcome 2, minus/plus the round result
+    expect(dealer.balanceOf('@newbie').balanceUct).toBeGreaterThanOrEqual(6);
+    // referrer: +5 referral bonus, referrals incremented
+    expect(dealer.balanceOf('@ref1').balanceUct).toBe(before + 5);
+    expect(dealer.referralInfo('@ref1').referrals).toBe(1);
+
+    // A second play with the same code does not re-apply.
+    const again = await firstPlay(dealer, '@newbie', 'newbie', code);
+    expect(again.referral).toBeUndefined();
+    expect(dealer.referralInfo('@ref1').referrals).toBe(1);
+  });
+
+  it('ignores self-referral and unknown codes', async () => {
+    const dealer = new GameDealer({ agent: stubAgent(), cooldownMs: 0, jackpotOdds: 1_000_000_000 });
+    dealer.newRound('coin', '@solo');
+    const own = dealer.referralInfo('@solo').code!;
+    const res = await firstPlay(dealer, '@solo', 'solo', own); // self-referral
+    expect(res.referral).toBeUndefined();
+
+    const res2 = await firstPlay(dealer, '@other', 'other', 'ZZZZZZ'); // unknown code
+    expect(res2.referral).toBeUndefined();
+    expect(dealer.referralInfo('@other').referred).toBe(false);
+  });
+});

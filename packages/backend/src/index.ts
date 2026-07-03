@@ -189,6 +189,13 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // The caller's invite code + how many friends they've brought in.
+  if (pathname === '/api/arcade/referral') {
+    const address = url.searchParams.get('address') ?? '';
+    json(res, 200, dealer ? dealer.referralInfo(address || undefined) : { code: null, referrals: 0, referred: false });
+    return;
+  }
+
   if (pathname === '/api/arcade/new' && req.method === 'POST') {
     if (!dealer) {
       json(res, 503, { error: 'The arcade dealer is still waking up — try again in a few seconds.' });
@@ -219,6 +226,7 @@ const server = http.createServer((req, res) => {
           bet: body.bet,
           playerAddress: typeof body.address === 'string' ? body.address : undefined,
           name: typeof body.name === 'string' ? body.name : undefined,
+          ref: typeof body.ref === 'string' ? body.ref : undefined,
         });
         json(res, 200, result);
       } catch (e) {

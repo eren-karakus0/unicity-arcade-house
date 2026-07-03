@@ -30,6 +30,10 @@ export interface PlayerState {
   everDaily: boolean;
   /** Achievement ids already unlocked (persisted to detect newly-earned). */
   unlocked: string[];
+  /** Key of the player who referred this one (set once, on first play). */
+  referredBy: string | undefined;
+  /** How many new players this player has referred. */
+  referrals: number;
 }
 
 export const DAILY_GOAL = 5;
@@ -53,6 +57,8 @@ export function newPlayerState(): PlayerState {
     totalWon: 0,
     everDaily: false,
     unlocked: [],
+    referredBy: undefined,
+    referrals: 0,
   };
 }
 

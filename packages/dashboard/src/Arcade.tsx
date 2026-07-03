@@ -16,8 +16,12 @@ import {
   fetchBalance,
   fetchAchievements,
   fetchTournament,
+  fetchReferral,
+  pendingRef,
+  clearRef,
   type AchievementView,
   type TournamentView,
+  type ReferralInfo,
   type DepositInfo,
   type GameMeta,
   type HouseEvent,
@@ -31,6 +35,7 @@ import {
 import { saveProof } from './lib/fairness';
 import { AchievementsPanel, AchievementToast } from './arcade/Achievements';
 import { TournamentPanel } from './arcade/Tournament';
+import { InvitePanel } from './arcade/Invite';
 import { GAME_UI, GAMES_META } from './arcade/games-ui';
 import { BotMark, Flame, LockMark, WheelFace } from './arcade/art';
 import { WinBurst } from './arcade/fx';
@@ -73,6 +78,7 @@ export function Arcade() {
   const [achievements, setAchievements] = useState<AchievementView[]>([]);
   const [achQueue, setAchQueue] = useState<AchievementView[]>([]);
   const [tourney, setTourney] = useState<TournamentView | null>(null);
+  const [referral, setReferral] = useState<ReferralInfo | null>(null);
   // The round's background on-chain payout (win/jackpot), polled until it lands.
   const [stl, setStl] = useState<RoundSettlement | null>(null);
   // Chips staked per round.
@@ -137,6 +143,11 @@ export function Arcade() {
     void fetchTournament().then(setTourney).catch(() => {});
   }, []);
 
+  const refreshReferral = useCallback(() => {
+    const addr = wallet.identity ? addressOf(wallet.identity) : undefined;
+    if (addr) void fetchReferral(addr).then(setReferral).catch(() => {});
+  }, [wallet.identity]);
+
   // Poll readiness — the free-tier backend cold-starts; keep probing (which
   // warms it) until the dealer is live.
   useEffect(() => {
@@ -198,7 +209,8 @@ export function Arcade() {
     if (!connected || ready !== true) return;
     refreshAchievements();
     refreshTournament();
-  }, [connected, ready, refreshAchievements, refreshTournament]);
+    refreshReferral();
+  }, [connected, ready, refreshAchievements, refreshTournament, refreshReferral]);
 
   // Poll the jackpot's background on-chain payout until it lands (or fails).
   useEffect(() => {
@@ -409,6 +421,7 @@ export function Arcade() {
         bet,
         address: addressOf(wallet.identity),
         name: nameOf(wallet.identity),
+        ref: pendingRef(),
       });
       setResult(res);
       saveProof(res); // archive the reveal for the fairness page's verifier
@@ -416,6 +429,21 @@ export function Arcade() {
         setAchQueue((q) => [...q, ...res.achievements!]);
         refreshAchievements();
         sfx.win(); // a little extra flourish on an unlock
+      }
+      if (res.referral) {
+        clearRef(); // applied once — don't send it again
+        setAchQueue((q) => [
+          ...q,
+          {
+            id: 'ref-welcome',
+            title: 'Welcome bonus!',
+            detail: `+${res.referral!.welcomeBonus} UCT for joining via a friend`,
+            icon: 'spark',
+            reward: res.referral!.welcomeBonus,
+            unlocked: true,
+          },
+        ]);
+        sfx.win();
       }
       if (res.outcome === 'win') refreshTournament(); // the standings just moved
       if (res.daily) {
@@ -848,6 +876,8 @@ export function Arcade() {
       </div>
 
       <AchievementsPanel items={achievements} />
+
+      <InvitePanel info={referral} />
 
       <AchievementToast queue={achQueue} onShown={(id) => setAchQueue((q) => q.filter((a) => a.id !== id))} />
     </section>
