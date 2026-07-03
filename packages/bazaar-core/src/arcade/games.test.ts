@@ -174,6 +174,32 @@ describe('progressive jackpot', () => {
     expect(stats.feed.some((e) => e.kind === 'jackpot')).toBe(true);
   });
 
+  it('restores the pot (not more) when a jackpot payout fails', async () => {
+    const failing = {
+      nametag: 'house-test',
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async () => {
+        throw new Error('testnet down');
+      },
+    } as unknown as SphereAgent;
+    const dealer = new GameDealer({
+      agent: failing,
+      cooldownMs: 0,
+      jackpotSeedUct: 20,
+      jackpotOdds: 1, // every roll hits
+    });
+    const nr = dealer.newRound('coin', '@pj');
+    const res = await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@pj', name: 'pj' });
+    expect(res.jackpot.hit).toBe(true);
+    await dealer.flushPayouts();
+    expect(dealer.settlementFor(nr.roundId).jackpot?.status).toBe('failed');
+    // The hit optimistically reset the pot to the seed; a failed payout must put
+    // it back to the pre-hit value (20), not seed + amount (40).
+    const stats = await dealer.houseStats();
+    expect(stats.jackpotUct).toBe(20);
+  });
+
   it('rejects bets above the balance (no fixed cap)', async () => {
     const dealer = new GameDealer({ agent: stubAgent([]), cooldownMs: 0 });
     const nr = dealer.newRound('coin', '@p2');

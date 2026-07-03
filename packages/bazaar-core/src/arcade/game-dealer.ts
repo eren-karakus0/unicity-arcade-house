@@ -718,8 +718,13 @@ export class GameDealer {
         const error = e instanceof Error ? e.message : 'payout failed';
         this.settlements.set(key, { status: 'failed', amountUct: amount, error, at: Date.now() });
         this.log.warn(`settlement ${key} failed: ${error}`);
-        // A failed jackpot payout puts the pot back.
-        if (memo === 'arcade-jackpot') this.pot = Math.min(this.jackpotCap, this.pot + amount);
+        // A failed jackpot payout puts the pot back. The hit optimistically reset
+        // the pot to the seed (pot = jackpotSeed), so restore the amount that was
+        // taken (won pot minus seed) rather than the full amount — which would
+        // over-restore by one seed on top of any growth since the hit.
+        if (memo === 'arcade-jackpot') {
+          this.pot = Math.min(this.jackpotCap, this.pot + amount - this.jackpotSeed);
+        }
         onFail?.();
       }
       this.pruneSettlements();
