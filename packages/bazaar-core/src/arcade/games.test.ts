@@ -320,6 +320,9 @@ describe('achievements — dealer wiring', () => {
 
   it('unlocks "first_win" on the first win and reports it in the catalog', async () => {
     const dealer = new GameDealer({ agent: stubAgent(), cooldownMs: 0, jackpotOdds: 1_000_000_000 });
+    // Fund a deep balance so a long cold streak can't bust before the first win
+    // (coin is 50/50; 100 straight losses is ~1 in 2^100).
+    dealer.creditDeposit({ id: 'seed-a2', amountBase: '20000', senderPubkey: '@a2' });
     let firstWinSeen = false;
     for (let i = 0; i < 100 && !firstWinSeen; i++) {
       const nr = dealer.newRound('coin', '@a2');
@@ -355,5 +358,64 @@ describe('achievements — dealer wiring', () => {
     // explorer needs all 7; with 3 distinct games it stays locked but is tracked.
     const catalog = dealer.achievementsOf('@a3');
     expect(catalog.find((a) => a.id === 'explorer')?.unlocked).toBe(false);
+  });
+});
+
+describe('tournament — dealer wiring', () => {
+  const stubAgent = (sent: { address: string; amount: number; memo?: string }[]) =>
+    ({
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async (address: string, amount: number, memo?: string) => {
+        sent.push({ address, amount, memo });
+        return { id: `tx-${sent.length}`, deliveryState: 'landed' };
+      },
+    }) as unknown as SphereAgent;
+
+  it('scores wins and exposes a live tournament view', async () => {
+    const dealer = new GameDealer({ agent: stubAgent([]), cooldownMs: 0, jackpotOdds: 1_000_000_000 });
+    dealer.creditDeposit({ id: 'seed-t1', amountBase: '20000', senderPubkey: '@t1' });
+    let scored = false;
+    for (let i = 0; i < 60 && !scored; i++) {
+      const nr = dealer.newRound('coin', '@t1');
+      const r = await dealer.play({ roundId: nr.roundId, choice: 'heads', bet: 1, playerAddress: '@t1', name: 't1' });
+      if (r.outcome === 'win') scored = true;
+    }
+    expect(scored).toBe(true);
+    const view = dealer.tournamentView();
+    expect(view.prize).toBeGreaterThan(0);
+    expect(view.endsAt).toBeGreaterThan(Date.now());
+    expect(view.standings.find((s) => s.name === 't1')?.score).toBeGreaterThanOrEqual(1);
+  });
+
+  it('crowns and pays the champion on-chain when the window closes', async () => {
+    const sent: { address: string; amount: number; memo?: string }[] = [];
+    // A 50ms window forces a close within the test.
+    const dealer = new GameDealer({
+      agent: stubAgent(sent),
+      cooldownMs: 0,
+      jackpotOdds: 1_000_000_000,
+      tournamentLengthMs: 50,
+      tournamentPrizeUct: 25,
+    });
+    dealer.creditDeposit({ id: 'seed-t2', amountBase: '20000', senderPubkey: '@t2' });
+    // Rack up at least one win so there's a scorer for the window.
+    for (let i = 0; i < 60; i++) {
+      const nr = dealer.newRound('coin', '@t2');
+      const r = await dealer.play({ roundId: nr.roundId, choice: 'heads', bet: 1, playerAddress: '@t2', name: 't2' });
+      if (r.outcome === 'win') break;
+    }
+    await new Promise((r) => setTimeout(r, 70)); // let the window elapse
+    // Any dealer touch rolls the window and enqueues the prize payout.
+    dealer.newRound('coin', '@t2');
+    await dealer.flushPayouts();
+    expect(sent.some((s) => s.memo === 'arcade-tournament' && s.amount === 25)).toBe(true);
+    const view = dealer.tournamentView();
+    expect(view.champions[0]).toMatchObject({ name: 't2', prize: 25 });
+    const stats = await dealer.houseStats();
+    expect(stats.feed.some((e) => e.kind === 'tournament')).toBe(true);
   });
 });

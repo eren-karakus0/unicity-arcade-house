@@ -43,7 +43,17 @@ let ready = false;
 
 async function boot(): Promise<void> {
   await houseAgent.start();
-  dealer = new GameDealer({ agent: houseAgent, cooldownMs: 800, logger: createLogger('dealer') });
+  // Tournament window: short enough to actually resolve during a live session
+  // (the free-tier host may sleep after ~15 min idle). Tunable via env.
+  const tourneyMin = Number(process.env.ARCADE_TOURNAMENT_MINUTES ?? '15');
+  const tourneyPrize = Number(process.env.ARCADE_TOURNAMENT_PRIZE_UCT ?? '25');
+  dealer = new GameDealer({
+    agent: houseAgent,
+    cooldownMs: 800,
+    tournamentLengthMs: Math.max(1, tourneyMin) * 60_000,
+    tournamentPrizeUct: Math.max(0, tourneyPrize),
+    logger: createLogger('dealer'),
+  });
   await dealer.start();
 
   // Deposits: the wallet-api rails deliver incoming tokens in the background,
@@ -170,6 +180,12 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/arcade/achievements') {
     const address = url.searchParams.get('address') ?? '';
     json(res, 200, { achievements: dealer ? dealer.achievementsOf(address || undefined) : [] });
+    return;
+  }
+
+  // The live tournament: countdown, standings, and past champions.
+  if (pathname === '/api/arcade/tournament') {
+    json(res, 200, dealer ? dealer.tournamentView() : { endsAt: 0, lengthMs: 0, prize: 0, standings: [], champions: [] });
     return;
   }
 

@@ -20,6 +20,7 @@ import {
   statsOf,
   type AchievementView,
 } from './achievements.js';
+import { Tournament, type TournamentView } from './tournament.js';
 
 export interface GameDealerOptions {
   /** The house wallet — pays winners and holds the prize treasury. */
@@ -42,6 +43,10 @@ export interface GameDealerOptions {
   jackpotCapUct?: number;
   /** Hit odds — a derived roll of 0 out of this wins the pot (default 150). */
   jackpotOdds?: number;
+  /** Tournament window length (default 1h). */
+  tournamentLengthMs?: number;
+  /** UCT prize paid on-chain to each window's champion (default 25). */
+  tournamentPrizeUct?: number;
   logger?: Logger;
 }
 
@@ -141,9 +146,9 @@ export interface LeaderRow {
   earnedUct: number;
 }
 
-/** A public house-side event: a deposit, an on-chain cash-out, a jackpot, or a treasury self-mint. */
+/** A public house-side event: a deposit, an on-chain cash-out, a jackpot, a tournament prize, or a treasury self-mint. */
 export interface HouseEvent {
-  kind: 'win' | 'mint' | 'jackpot' | 'cashout' | 'deposit';
+  kind: 'win' | 'mint' | 'jackpot' | 'cashout' | 'deposit' | 'tournament';
   at: number;
   amountUct: number;
   name?: string;
@@ -221,6 +226,7 @@ export class GameDealer {
   private pot: number;
   private readonly settlements = new Map<string, Settlement>();
   private readonly inFlight = new Set<Promise<void>>();
+  private readonly tourney: Tournament;
 
   constructor(opts: GameDealerOptions) {
     this.agent = opts.agent;
@@ -234,6 +240,10 @@ export class GameDealer {
     this.jackpotCap = opts.jackpotCapUct ?? 100;
     this.jackpotOdds = opts.jackpotOdds ?? 150;
     this.pot = this.jackpotSeed;
+    this.tourney = new Tournament({
+      ...(opts.tournamentLengthMs !== undefined ? { lengthMs: opts.tournamentLengthMs } : {}),
+      ...(opts.tournamentPrizeUct !== undefined ? { prizeUct: opts.tournamentPrizeUct } : {}),
+    });
     this.log = opts.logger ?? createLogger('dealer');
   }
 
@@ -254,6 +264,7 @@ export class GameDealer {
     const game = GAMES[gameId];
     if (!game) throw new Error(`Unknown game: ${gameId}`);
     this.sweep();
+    this.settleTournament(Date.now());
     if (playerAddress) {
       const last = this.lastPlay.get(playerAddress) ?? 0;
       if (Date.now() - last < this.cooldown) {
@@ -392,6 +403,12 @@ export class GameDealer {
     const achievementBonus = fresh.reduce((sum, a) => sum + a.reward, 0);
     state = { ...state, unlocked, chips: state.chips + achievementBonus };
     this.players.set(key, state);
+
+    // Tournament: net winnings (payout minus stake) race the current window.
+    this.settleTournament(Date.now());
+    if (judged.outcome === 'win') {
+      this.tourney.record(key, name, input.playerAddress, reward - bet);
+    }
     const achievements: AchievementView[] = fresh.map((a) => ({
       id: a.id,
       title: a.title,
@@ -427,6 +444,21 @@ export class GameDealer {
   achievementsOf(address?: string): AchievementView[] {
     const state = address ? this.players.get(this.keyFor(address)) : undefined;
     return catalogView(state?.unlocked ?? []);
+  }
+
+  /** The live tournament: countdown, current standings, and past champions. */
+  tournamentView(): TournamentView {
+    const now = Date.now();
+    this.settleTournament(now);
+    return this.tourney.view(now);
+  }
+
+  /** Close any elapsed tournament windows and pay each champion on-chain. */
+  private settleTournament(now: number): void {
+    for (const c of this.tourney.maybeRoll(now)) {
+      this.log.info(`TOURNAMENT — @${c.name} took the ${c.prize} UCT prize (score ${c.score})`);
+      this.enqueueSettlement(`tourney-${c.at}`, c.address, c.prize, 'arcade-tournament', c.name, 'tournament');
+    }
   }
 
   /** The player's in-house UCT balance. */
@@ -591,7 +623,14 @@ export class GameDealer {
           ...(tx.deliveryState ? { delivery: tx.deliveryState } : {}),
         });
         this.paidOut += amount;
-        const kind = memo === 'arcade-jackpot' ? 'jackpot' : memo === 'arcade-cashout' ? 'cashout' : 'win';
+        const kind: HouseEvent['kind'] =
+          memo === 'arcade-jackpot'
+            ? 'jackpot'
+            : memo === 'arcade-cashout'
+              ? 'cashout'
+              : memo === 'arcade-tournament'
+                ? 'tournament'
+                : 'win';
         this.pushEvent({ kind, at: Date.now(), amountUct: amount, name, game });
       } catch (e) {
         const error = e instanceof Error ? e.message : 'payout failed';

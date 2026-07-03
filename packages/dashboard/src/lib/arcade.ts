@@ -98,7 +98,7 @@ export interface LeaderRow {
 }
 
 export interface HouseEvent {
-  kind: 'win' | 'mint' | 'jackpot' | 'cashout' | 'deposit';
+  kind: 'win' | 'mint' | 'jackpot' | 'cashout' | 'deposit' | 'tournament';
   at: number;
   amountUct: number;
   name?: string;
@@ -187,6 +187,30 @@ export async function fetchAchievements(address?: string): Promise<AchievementVi
   const r = await fetch(`${BACKEND_URL}/api/arcade/achievements${q}`, { signal: AbortSignal.timeout(8_000) });
   const d = (await r.json()) as { achievements?: AchievementView[] };
   return d.achievements ?? [];
+}
+
+export interface TournamentStanding {
+  name: string;
+  score: number;
+}
+export interface TournamentChampion {
+  name: string;
+  score: number;
+  at: number;
+  prize: number;
+}
+export interface TournamentView {
+  endsAt: number;
+  lengthMs: number;
+  prize: number;
+  standings: TournamentStanding[];
+  champions: TournamentChampion[];
+}
+
+/** The live tournament: countdown, standings, and past champions. */
+export async function fetchTournament(): Promise<TournamentView> {
+  const r = await fetch(`${BACKEND_URL}/api/arcade/tournament`, { signal: AbortSignal.timeout(8_000) });
+  return (await r.json()) as TournamentView;
 }
 
 export async function fetchLeaderboard(): Promise<Leaderboard> {

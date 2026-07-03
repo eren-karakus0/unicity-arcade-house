@@ -15,7 +15,9 @@ import {
   verifyWheel,
   fetchBalance,
   fetchAchievements,
+  fetchTournament,
   type AchievementView,
+  type TournamentView,
   type DepositInfo,
   type GameMeta,
   type HouseEvent,
@@ -28,6 +30,7 @@ import {
 } from './lib/arcade';
 import { saveProof } from './lib/fairness';
 import { AchievementsPanel, AchievementToast } from './arcade/Achievements';
+import { TournamentPanel } from './arcade/Tournament';
 import { GAME_UI, GAMES_META } from './arcade/games-ui';
 import { BotMark, Flame, LockMark, WheelFace } from './arcade/art';
 import { WinBurst } from './arcade/fx';
@@ -69,6 +72,7 @@ export function Arcade() {
   // Achievement catalog (unlocked flags) + a queue of freshly-earned ones to toast.
   const [achievements, setAchievements] = useState<AchievementView[]>([]);
   const [achQueue, setAchQueue] = useState<AchievementView[]>([]);
+  const [tourney, setTourney] = useState<TournamentView | null>(null);
   // The round's background on-chain payout (win/jackpot), polled until it lands.
   const [stl, setStl] = useState<RoundSettlement | null>(null);
   // Chips staked per round.
@@ -129,6 +133,10 @@ export function Arcade() {
     void fetchAchievements(addr).then(setAchievements).catch(() => {});
   }, [wallet.identity]);
 
+  const refreshTournament = useCallback(() => {
+    void fetchTournament().then(setTourney).catch(() => {});
+  }, []);
+
   // Poll readiness — the free-tier backend cold-starts; keep probing (which
   // warms it) until the dealer is live.
   useEffect(() => {
@@ -165,6 +173,7 @@ export function Arcade() {
     const addr = wallet.identity ? addressOf(wallet.identity) : undefined;
     const tick = () => {
       refreshBoard();
+      refreshTournament();
       if (addr) {
         void fetchBalance(addr)
           .then((b) => setYou((prev) => (prev && b.balanceUct !== prev.chips ? { ...prev, chips: b.balanceUct } : prev)))
@@ -173,7 +182,7 @@ export function Arcade() {
     };
     const t = setInterval(tick, 15_000);
     return () => clearInterval(t);
-  }, [connected, ready, refreshBoard, wallet.identity]);
+  }, [connected, ready, refreshBoard, refreshTournament, wallet.identity]);
 
   // Locked landing: tease the REAL floor behind the glass (live pot + payout
   // feed) — and warm the dealer up before the player even connects.
@@ -184,11 +193,12 @@ export function Arcade() {
     return () => clearInterval(t);
   }, [connected, refreshBoard]);
 
-  // Load the player's achievement board once the hall is live.
+  // Load the player's achievement board + the tournament once the hall is live.
   useEffect(() => {
     if (!connected || ready !== true) return;
     refreshAchievements();
-  }, [connected, ready, refreshAchievements]);
+    refreshTournament();
+  }, [connected, ready, refreshAchievements, refreshTournament]);
 
   // Poll the jackpot's background on-chain payout until it lands (or fails).
   useEffect(() => {
@@ -407,6 +417,7 @@ export function Arcade() {
         refreshAchievements();
         sfx.win(); // a little extra flourish on an unlock
       }
+      if (res.outcome === 'win') refreshTournament(); // the standings just moved
       if (res.daily) {
         setYou({ streak: res.streak, best: res.best, daily: res.daily, chips: res.chips, chipsGranted: 0 });
       }
@@ -807,6 +818,8 @@ export function Arcade() {
         {error && <div className="tryit__error">⚠ {error}</div>}
       </div>
 
+      <TournamentPanel view={tourney} />
+
       <div className="arcade__duo">
         <div className="board">
           <div className="board__head">
@@ -889,9 +902,11 @@ function HouseTicker({ feed, games }: { feed: HouseEvent[]; games: GameMeta[] })
         <strong>@{w.name}</strong>{' '}
         {w.kind === 'jackpot'
           ? `HIT THE ${w.amountUct} UCT JACKPOT on ${gameTitle(games, w.game)}`
-          : w.kind === 'cashout'
-            ? `cashed out ${w.amountUct} UCT on-chain`
-            : `won ${w.amountUct} UCT on ${gameTitle(games, w.game)}`}
+          : w.kind === 'tournament'
+            ? `WON THE ${w.amountUct} UCT TOURNAMENT`
+            : w.kind === 'cashout'
+              ? `cashed out ${w.amountUct} UCT on-chain`
+              : `won ${w.amountUct} UCT on ${gameTitle(games, w.game)}`}
         <em> · {timeAgo(w.at)}</em>
       </span>
     ));
@@ -943,9 +958,11 @@ function HousePanel({
                   ? `treasury low — the agent minted itself +${e.amountUct} UCT`
                   : e.kind === 'jackpot'
                     ? `JACKPOT — paid @${e.name} the whole ${e.amountUct} UCT pot · ${gameTitle(games, e.game)}`
-                    : e.kind === 'cashout'
-                      ? `cashed @${e.name} out — ${e.amountUct} UCT sent on-chain`
-                      : `paid @${e.name} +${e.amountUct} UCT · ${gameTitle(games, e.game)}`}
+                    : e.kind === 'tournament'
+                      ? `TOURNAMENT — paid champion @${e.name} the ${e.amountUct} UCT prize`
+                      : e.kind === 'cashout'
+                        ? `cashed @${e.name} out — ${e.amountUct} UCT sent on-chain`
+                        : `paid @${e.name} +${e.amountUct} UCT · ${gameTitle(games, e.game)}`}
               </span>
               <span className="hevent__t">{timeAgo(e.at)}</span>
             </div>
