@@ -223,6 +223,29 @@ export interface ReferralInfo {
   referred: boolean;
 }
 
+export interface PlayerProfile {
+  balanceUct: number;
+  streak: number;
+  best: number;
+  wins: number;
+  plays: number;
+  totalWon: number;
+  biggestWin: number;
+  jackpots: number;
+  gamesPlayed: number;
+  totalGames: number;
+  daily: DailyView;
+  achievements: AchievementView[];
+  referral: ReferralInfo;
+}
+
+/** A player's consolidated profile (stats + achievements + invite). */
+export async function fetchProfile(address?: string): Promise<PlayerProfile | null> {
+  const q = address ? `?address=${encodeURIComponent(address)}` : '';
+  const r = await fetch(`${BACKEND_URL}/api/arcade/profile${q}`, { signal: AbortSignal.timeout(8_000) });
+  return (await r.json()) as PlayerProfile | null;
+}
+
 /** The caller's invite code + how many friends they've brought in. */
 export async function fetchReferral(address?: string): Promise<ReferralInfo> {
   const q = address ? `?address=${encodeURIComponent(address)}` : '';

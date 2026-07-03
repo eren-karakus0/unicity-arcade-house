@@ -196,6 +196,13 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // A player's consolidated profile: stats + achievements + invite.
+  if (pathname === '/api/arcade/profile') {
+    const address = url.searchParams.get('address') ?? '';
+    json(res, 200, dealer ? dealer.profileOf(address || undefined) : null);
+    return;
+  }
+
   if (pathname === '/api/arcade/new' && req.method === 'POST') {
     if (!dealer) {
       json(res, 503, { error: 'The arcade dealer is still waking up — try again in a few seconds.' });

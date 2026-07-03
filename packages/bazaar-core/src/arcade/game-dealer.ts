@@ -158,6 +158,23 @@ export interface HouseEvent {
   game?: string;
 }
 
+/** A player's consolidated profile (stats + achievements + invite). */
+export interface PlayerProfile {
+  balanceUct: number;
+  streak: number;
+  best: number;
+  wins: number;
+  plays: number;
+  totalWon: number;
+  biggestWin: number;
+  jackpots: number;
+  gamesPlayed: number;
+  totalGames: number;
+  daily: DailyView;
+  achievements: AchievementView[];
+  referral: { code: string | null; referrals: number; referred: boolean };
+}
+
 /**
  * The minimal shape of an incoming transfer we credit as a deposit — matches
  * the wallet's RECEIVED history entries (the reliable observation point for
@@ -488,6 +505,27 @@ export class GameDealer {
   achievementsOf(address?: string): AchievementView[] {
     const state = address ? this.players.get(this.keyFor(address)) : undefined;
     return catalogView(state?.unlocked ?? []);
+  }
+
+  /** Everything a player's profile page shows: stats, achievements, invite. */
+  profileOf(address?: string): PlayerProfile {
+    const state = address ? this.players.get(this.keyFor(address)) : undefined;
+    const day = todayKey();
+    return {
+      balanceUct: state?.chips ?? 0,
+      streak: state?.streak ?? 0,
+      best: state?.best ?? 0,
+      wins: state?.wins ?? 0,
+      plays: state?.plays ?? 0,
+      totalWon: state?.totalWon ?? 0,
+      biggestWin: state?.biggestWin ?? 0,
+      jackpots: state?.jackpots ?? 0,
+      gamesPlayed: state?.games.length ?? 0,
+      totalGames: Object.keys(GAMES).length,
+      daily: state ? dailyView(state, day) : { goal: DAILY_GOAL, wins: 0, claimed: false },
+      achievements: this.achievementsOf(address),
+      referral: this.referralInfo(address),
+    };
   }
 
   /** The live tournament: countdown, current standings, and past champions. */

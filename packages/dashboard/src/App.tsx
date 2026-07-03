@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Arcade } from './Arcade';
 import { ConnectWallet } from './ConnectWallet';
 import { Fairness } from './Fairness';
+import { Profile } from './Profile';
 import { captureRef } from './lib/arcade';
 import { Card, Coin, Die, HandScissors, PlinkoMark } from './arcade/art';
 import { isMuted, setMuted, sfx } from './arcade/sound';
@@ -27,7 +28,7 @@ export function App() {
     <div className="app">
       <WallArt />
       <Header />
-      {route === '#/fairness' ? <Fairness /> : <Arcade />}
+      {route === '#/fairness' ? <Fairness /> : route === '#/profile' ? <Profile /> : <Arcade />}
       <Footer />
     </div>
   );
@@ -72,6 +73,9 @@ function Header() {
         <div className="hdr__sub">Provably-fair games · on-chain payouts</div>
       </div>
       <div className="hdr__right">
+        <a className="hdr__fair" href="#/profile" title="your stats, badges, and invite link">
+          profile
+        </a>
         <a className="hdr__fair" href="#/fairness" title="verify any round yourself">
           fairness
         </a>
