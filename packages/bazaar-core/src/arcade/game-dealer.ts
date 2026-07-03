@@ -14,6 +14,12 @@ import {
   type DailyView,
   type PlayerState,
 } from './events-logic.js';
+import {
+  catalogView,
+  newlyUnlocked,
+  statsOf,
+  type AchievementView,
+} from './achievements.js';
 
 export interface GameDealerOptions {
   /** The house wallet — pays winners and holds the prize treasury. */
@@ -110,6 +116,10 @@ export interface PlayResult {
   dailyBonus: number;
   daily: DailyView;
   jackpot: JackpotResult;
+  /** Achievements newly unlocked by this round (for a one-time reveal). */
+  achievements: AchievementView[];
+  /** UCT credited from those achievements' one-time rewards. */
+  achievementBonus: number;
 }
 
 /** Background on-chain payout state, pollable per round. */
@@ -333,7 +343,6 @@ export class GameDealer {
     } else {
       state = applyLoss(state); // the bet sinks to the house
     }
-    this.players.set(key, state);
 
     this.record(name, judged.outcome);
     if (judged.outcome === 'win') this.creditEarned(name, reward);
@@ -368,6 +377,30 @@ export class GameDealer {
       this.pot = Math.min(this.jackpotCap, this.pot + this.jackpotGrowth);
     }
 
+    // Lifetime tallies feed achievements (and the tournament board).
+    state = {
+      ...state,
+      plays: state.plays + 1,
+      games: state.games.includes(round.gameId) ? state.games : [...state.games, round.gameId],
+      wins: judged.outcome === 'win' ? state.wins + 1 : state.wins,
+      totalWon: judged.outcome === 'win' ? state.totalWon + reward : state.totalWon,
+      biggestWin: judged.outcome === 'win' && reward > state.biggestWin ? reward : state.biggestWin,
+      jackpots: jackpot.hit ? state.jackpots + 1 : state.jackpots,
+    };
+    // Award any freshly-earned achievements once; their rewards credit balance.
+    const { fresh, unlocked } = newlyUnlocked(statsOf(state), state.unlocked);
+    const achievementBonus = fresh.reduce((sum, a) => sum + a.reward, 0);
+    state = { ...state, unlocked, chips: state.chips + achievementBonus };
+    this.players.set(key, state);
+    const achievements: AchievementView[] = fresh.map((a) => ({
+      id: a.id,
+      title: a.title,
+      detail: a.detail,
+      icon: a.icon,
+      reward: a.reward,
+      unlocked: true,
+    }));
+
     return {
       game: round.gameId,
       roundId: input.roundId,
@@ -385,7 +418,15 @@ export class GameDealer {
       dailyBonus,
       daily: dailyView(state, todayKey()),
       jackpot,
+      achievements,
+      achievementBonus,
     };
+  }
+
+  /** The full achievement catalog annotated with what this player has unlocked. */
+  achievementsOf(address?: string): AchievementView[] {
+    const state = address ? this.players.get(this.keyFor(address)) : undefined;
+    return catalogView(state?.unlocked ?? []);
   }
 
   /** The player's in-house UCT balance. */

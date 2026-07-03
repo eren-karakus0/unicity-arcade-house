@@ -15,6 +15,21 @@ export interface PlayerState {
   chips: number;
   /** One-time welcome stake already granted. */
   welcomed: boolean;
+  /** Lifetime tallies (this server session) — feed achievements + tournament. */
+  wins: number;
+  plays: number;
+  /** Distinct game ids the player has played (for the "explorer" achievement). */
+  games: string[];
+  /** Progressive-jackpot hits. */
+  jackpots: number;
+  /** Largest single-round payout (UCT). */
+  biggestWin: number;
+  /** Total UCT won across all rounds (wins only). */
+  totalWon: number;
+  /** Completed the daily challenge at least once. */
+  everDaily: boolean;
+  /** Achievement ids already unlocked (persisted to detect newly-earned). */
+  unlocked: string[];
 }
 
 export const DAILY_GOAL = 5;
@@ -30,6 +45,14 @@ export function newPlayerState(): PlayerState {
     dailyClaimed: false,
     chips: 0,
     welcomed: false,
+    wins: 0,
+    plays: 0,
+    games: [],
+    jackpots: 0,
+    biggestWin: 0,
+    totalWon: 0,
+    everDaily: false,
+    unlocked: [],
   };
 }
 
@@ -82,6 +105,7 @@ export function applyWin(prev: PlayerState, day: string): WinUpdate {
   let justClaimed = false;
   if (!s.dailyClaimed && s.dailyWins >= DAILY_GOAL) {
     s.dailyClaimed = true;
+    s.everDaily = true;
     db = DAILY_REWARD;
     justClaimed = true;
   }

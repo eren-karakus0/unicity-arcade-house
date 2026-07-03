@@ -14,6 +14,8 @@ import {
   verifyPlinko,
   verifyWheel,
   fetchBalance,
+  fetchAchievements,
+  type AchievementView,
   type DepositInfo,
   type GameMeta,
   type HouseEvent,
@@ -25,6 +27,7 @@ import {
   type RoundSettlement,
 } from './lib/arcade';
 import { saveProof } from './lib/fairness';
+import { AchievementsPanel, AchievementToast } from './arcade/Achievements';
 import { GAME_UI, GAMES_META } from './arcade/games-ui';
 import { BotMark, Flame, LockMark, WheelFace } from './arcade/art';
 import { WinBurst } from './arcade/fx';
@@ -63,6 +66,9 @@ export function Arcade() {
   const [pot, setPot] = useState<number | null>(null);
   const [you, setYou] = useState<PlayerSnapshot | null>(null);
   const [dailyDef, setDailyDef] = useState<{ goal: number; reward: number } | null>(null);
+  // Achievement catalog (unlocked flags) + a queue of freshly-earned ones to toast.
+  const [achievements, setAchievements] = useState<AchievementView[]>([]);
+  const [achQueue, setAchQueue] = useState<AchievementView[]>([]);
   // The round's background on-chain payout (win/jackpot), polled until it lands.
   const [stl, setStl] = useState<RoundSettlement | null>(null);
   // Chips staked per round.
@@ -118,6 +124,11 @@ export function Arcade() {
     void fetchLeaderboard().then(applyBoard).catch(() => {});
   }, [applyBoard]);
 
+  const refreshAchievements = useCallback(() => {
+    const addr = wallet.identity ? addressOf(wallet.identity) : undefined;
+    void fetchAchievements(addr).then(setAchievements).catch(() => {});
+  }, [wallet.identity]);
+
   // Poll readiness — the free-tier backend cold-starts; keep probing (which
   // warms it) until the dealer is live.
   useEffect(() => {
@@ -172,6 +183,12 @@ export function Arcade() {
     const t = setInterval(refreshBoard, 30_000);
     return () => clearInterval(t);
   }, [connected, refreshBoard]);
+
+  // Load the player's achievement board once the hall is live.
+  useEffect(() => {
+    if (!connected || ready !== true) return;
+    refreshAchievements();
+  }, [connected, ready, refreshAchievements]);
 
   // Poll the jackpot's background on-chain payout until it lands (or fails).
   useEffect(() => {
@@ -385,6 +402,11 @@ export function Arcade() {
       });
       setResult(res);
       saveProof(res); // archive the reveal for the fairness page's verifier
+      if (res.achievements?.length) {
+        setAchQueue((q) => [...q, ...res.achievements!]);
+        refreshAchievements();
+        sfx.win(); // a little extra flourish on an unlock
+      }
       if (res.daily) {
         setYou({ streak: res.streak, best: res.best, daily: res.daily, chips: res.chips, chipsGranted: 0 });
       }
@@ -811,6 +833,10 @@ export function Arcade() {
 
         <HousePanel stats={houseStats} house={house} games={games} />
       </div>
+
+      <AchievementsPanel items={achievements} />
+
+      <AchievementToast queue={achQueue} onShown={(id) => setAchQueue((q) => q.filter((a) => a.id !== id))} />
     </section>
   );
 }

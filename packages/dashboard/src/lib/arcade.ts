@@ -54,6 +54,15 @@ export interface JackpotResult {
   error?: string;
 }
 
+export interface AchievementView {
+  id: string;
+  title: string;
+  detail: string;
+  icon: 'spark' | 'flame' | 'crown' | 'coin' | 'dice' | 'target' | 'star' | 'trophy';
+  reward: number;
+  unlocked: boolean;
+}
+
 export interface PlayResult {
   game: string;
   roundId: string;
@@ -73,6 +82,10 @@ export interface PlayResult {
   dailyBonus: number;
   daily: DailyView;
   jackpot?: JackpotResult;
+  /** Achievements newly unlocked by this round (for a one-time reveal). */
+  achievements?: AchievementView[];
+  /** UCT credited from those achievements' one-time rewards. */
+  achievementBonus?: number;
 }
 
 export interface LeaderRow {
@@ -166,6 +179,14 @@ export async function fetchBalance(address: string): Promise<{ balanceUct: numbe
     signal: AbortSignal.timeout(8_000),
   });
   return (await r.json()) as { balanceUct: number };
+}
+
+/** The achievement catalog annotated with what this player has unlocked. */
+export async function fetchAchievements(address?: string): Promise<AchievementView[]> {
+  const q = address ? `?address=${encodeURIComponent(address)}` : '';
+  const r = await fetch(`${BACKEND_URL}/api/arcade/achievements${q}`, { signal: AbortSignal.timeout(8_000) });
+  const d = (await r.json()) as { achievements?: AchievementView[] };
+  return d.achievements ?? [];
 }
 
 export async function fetchLeaderboard(): Promise<Leaderboard> {

@@ -290,3 +290,70 @@ describe('rps game wrapper', () => {
     expect(['win', 'lose', 'tie']).toContain(r.outcome);
   });
 });
+
+describe('achievements — dealer wiring', () => {
+  const stubAgent = () =>
+    ({
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async () => ({ id: 'tx', deliveryState: 'landed' }),
+    }) as unknown as SphereAgent;
+
+  it('unlocks "jackpot" once on a forced hit and credits nothing extra (pot is the reward)', async () => {
+    const dealer = new GameDealer({ agent: stubAgent(), cooldownMs: 0, jackpotOdds: 1 });
+    const nr = dealer.newRound('coin', '@a1');
+    const res = await dealer.play({ roundId: nr.roundId, choice: 'heads', bet: 1, playerAddress: '@a1', name: 'a1' });
+    expect(res.jackpot.hit).toBe(true);
+    expect(res.achievements.some((a) => a.id === 'jackpot')).toBe(true);
+    // The jackpot badge carries no UCT reward (the pot itself is the prize).
+    const jackpotBadge = res.achievements.find((a) => a.id === 'jackpot');
+    expect(jackpotBadge?.reward).toBe(0);
+
+    // Playing again does not re-award it.
+    const nr2 = dealer.newRound('coin', '@a1');
+    const res2 = await dealer.play({ roundId: nr2.roundId, choice: 'heads', bet: 1, playerAddress: '@a1', name: 'a1' });
+    expect(res2.achievements.some((a) => a.id === 'jackpot')).toBe(false);
+  });
+
+  it('unlocks "first_win" on the first win and reports it in the catalog', async () => {
+    const dealer = new GameDealer({ agent: stubAgent(), cooldownMs: 0, jackpotOdds: 1_000_000_000 });
+    let firstWinSeen = false;
+    for (let i = 0; i < 100 && !firstWinSeen; i++) {
+      const nr = dealer.newRound('coin', '@a2');
+      let r: Awaited<ReturnType<GameDealer['play']>>;
+      try {
+        r = await dealer.play({ roundId: nr.roundId, choice: 'heads', bet: 1, playerAddress: '@a2', name: 'a2' });
+      } catch {
+        break; // busted
+      }
+      if (r.outcome === 'win') {
+        expect(r.achievements.some((a) => a.id === 'first_win')).toBe(true);
+        expect(r.achievementBonus).toBeGreaterThanOrEqual(1); // first_win grants 1 UCT
+        firstWinSeen = true;
+      }
+    }
+    expect(firstWinSeen).toBe(true);
+    const catalog = dealer.achievementsOf('@a2');
+    expect(catalog.find((a) => a.id === 'first_win')?.unlocked).toBe(true);
+    expect(catalog.length).toBeGreaterThan(1);
+  });
+
+  it('tracks distinct games played toward the explorer badge', async () => {
+    const dealer = new GameDealer({ agent: stubAgent(), cooldownMs: 0, jackpotOdds: 1_000_000_000 });
+    for (const g of ['coin', 'rps', 'dice']) {
+      const nr = dealer.newRound(g, '@a3');
+      const choice = g === 'dice' ? 'seed1234' : g === 'rps' ? 'rock' : 'heads';
+      try {
+        await dealer.play({ roundId: nr.roundId, choice, bet: 1, playerAddress: '@a3', name: 'a3' });
+      } catch {
+        /* a loss can bust the welcome stake; the play still counted */
+      }
+    }
+    // explorer needs all 7; with 3 distinct games it stays locked but is tracked.
+    const catalog = dealer.achievementsOf('@a3');
+    expect(catalog.find((a) => a.id === 'explorer')?.unlocked).toBe(false);
+  });
+});

@@ -166,6 +166,13 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // The achievement catalog, annotated with what this player has unlocked.
+  if (pathname === '/api/arcade/achievements') {
+    const address = url.searchParams.get('address') ?? '';
+    json(res, 200, { achievements: dealer ? dealer.achievementsOf(address || undefined) : [] });
+    return;
+  }
+
   if (pathname === '/api/arcade/new' && req.method === 'POST') {
     if (!dealer) {
       json(res, 503, { error: 'The arcade dealer is still waking up — try again in a few seconds.' });
