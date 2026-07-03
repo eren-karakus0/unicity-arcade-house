@@ -24,6 +24,7 @@ import {
   type PlayResult,
   type RoundSettlement,
 } from './lib/arcade';
+import { saveProof } from './lib/fairness';
 import { GAME_UI, GAMES_META } from './arcade/games-ui';
 import { BotMark, Flame, LockMark, WheelFace } from './arcade/art';
 import { WinBurst } from './arcade/fx';
@@ -383,6 +384,7 @@ export function Arcade() {
         name: nameOf(wallet.identity),
       });
       setResult(res);
+      saveProof(res); // archive the reveal for the fairness page's verifier
       if (res.daily) {
         setYou({ streak: res.streak, best: res.best, daily: res.daily, chips: res.chips, chipsGranted: 0 });
       }
@@ -764,7 +766,12 @@ export function Arcade() {
               {verified === null ? (
                 <span className="verify verify--wait">verifying fairness…</span>
               ) : verified ? (
-                <span className="verify verify--ok">🔐 provably fair — the reveal matches the sealed commitment</span>
+                <span className="verify verify--ok">
+                  🔐 provably fair — the reveal matches the sealed commitment{' '}
+                  <a className="verify__link" href="#/fairness" title="re-run the math yourself, step by step">
+                    see the math →
+                  </a>
+                </span>
               ) : (
                 <span className="verify verify--bad">⚠ commitment did not verify</span>
               )}

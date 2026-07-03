@@ -1398,6 +1398,328 @@
 /* Reduced motion: quiet only the AMBIENT loops (background glow, header
    scan, ticker). Game reveals are user-initiated actions — in an arcade the
    motion IS the content, so spins/rolls/flips stay on. */
+/* ------------------------------------------------------------------ */
+/* fairness page                                                        */
+/* ------------------------------------------------------------------ */
+.hdr__fair,
+.footer__fair,
+.verify__link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--border-focus);
+  transition: color 0.15s, border-color 0.15s;
+}
+.hdr__fair {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding-bottom: 2px;
+}
+.hdr__fair:hover,
+.footer__fair:hover,
+.verify__link:hover { color: var(--accent); border-color: var(--accent); }
+.footer__fair { color: inherit; }
+.verify__link { margin-left: 6px; color: var(--risk-low); border-color: rgba(61, 220, 151, 0.35); }
+.verify__link:hover { color: #7dffc4; border-color: #7dffc4; }
+
+.fair {
+  max-width: 880px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  animation: fadein 0.35s ease both;
+}
+@keyframes fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.fair__back {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.fair__back:hover { color: var(--accent); }
+
+.fair__hero { text-align: center; }
+.fair__title {
+  font-family: var(--font-display);
+  font-size: clamp(34px, 6vw, 56px);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin: 0 0 12px;
+  line-height: 1.05;
+}
+.fair__title em { font-style: normal; color: var(--accent); text-shadow: 0 0 28px rgba(255, 111, 0, 0.35); }
+.fair__sub {
+  max-width: 620px;
+  margin: 0 auto;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.6;
+}
+.fair__sub code { font-family: var(--font-mono); color: var(--accent); font-size: 13px; }
+
+.fair__h2 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  margin: 0 0 8px;
+}
+.fair__note { color: var(--text-muted); font-size: 13.5px; line-height: 1.55; margin: 0 0 14px; }
+.fair__note code { font-family: var(--font-mono); color: var(--text-secondary); font-size: 12px; }
+
+/* how it works */
+.fair__steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.fairstep {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  padding: 18px 16px 14px;
+}
+.fairstep__no {
+  position: absolute;
+  top: -12px;
+  left: 14px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--brand-black);
+  background: var(--accent);
+  border-radius: 999px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+}
+.fairstep h3 {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 2px 0 8px;
+}
+.fairstep p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-secondary); }
+.fairstep code { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-primary); }
+
+/* verifier */
+.fair__verifier,
+.fair__lab,
+.fair__odds {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  padding: 22px 22px 20px;
+}
+.fair__empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: 18px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13.5px;
+}
+.fair__empty a { color: var(--accent); }
+
+.fair__rounds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.fairround {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 9px 12px;
+}
+.fairround--active { border-color: var(--border-focus); background: var(--accent-glow); }
+.fairround__game { font-weight: 600; font-size: 13.5px; }
+.fairround__outcome {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.fairround__outcome--win { color: var(--risk-low); border-color: rgba(61, 220, 151, 0.4); }
+.fairround__outcome--lose { color: var(--risk-critical); border-color: rgba(255, 59, 48, 0.4); }
+.fairround__meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); }
+.fairround__actions { margin-left: auto; display: flex; gap: 8px; }
+
+.fairbtn {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  color: var(--brand-black);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.fairbtn:hover { filter: brightness(1.15); }
+.fairbtn:disabled { opacity: 0.4; cursor: default; }
+.fairbtn--ghost { color: var(--text-secondary); background: transparent; border-color: var(--border); }
+.fairbtn--ghost:hover { border-color: var(--border-focus); color: var(--accent); filter: none; }
+
+.fair__pastetoggle {
+  margin-top: 14px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  padding: 0;
+  border-bottom: 1px dotted var(--border-focus);
+}
+.fair__pastetoggle:hover { color: var(--accent); }
+.fair__paste { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.fair__paste textarea {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  resize: vertical;
+}
+.fair__paste textarea:focus { outline: none; border-color: var(--border-focus); }
+.fair__pasteerr { color: var(--risk-critical); font-family: var(--font-mono); font-size: 12px; }
+
+/* the step-by-step report */
+.fairreport { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+.fairstep2 {
+  display: flex;
+  gap: 12px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 12px 14px;
+  opacity: 0;
+  animation: stepin 0.4s ease forwards;
+}
+@keyframes stepin { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+.fairstep2--ok { border-left-color: var(--risk-low); }
+.fairstep2--bad { border-left-color: var(--risk-critical); }
+.fairstep2__mark {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.fairstep2--ok .fairstep2__mark { color: var(--risk-low); }
+.fairstep2--bad .fairstep2__mark { color: var(--risk-critical); }
+.fairstep2__body { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.fairstep2__title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.fairstep2__formula {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  word-break: break-all;
+}
+.fairstep2__cmp {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.fairstep2__cmp code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.fairstep2__vs { color: var(--text-faint); }
+.fairstep2__detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+.fairverdict {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-align: center;
+  border-radius: var(--radius-md);
+  padding: 12px;
+  opacity: 0;
+  animation: stepin 0.5s ease forwards;
+}
+.fairverdict--ok { color: var(--risk-low); border: 1px solid rgba(61, 220, 151, 0.35); background: rgba(61, 220, 151, 0.06); }
+.fairverdict--bad { color: var(--risk-critical); border: 1px solid rgba(255, 59, 48, 0.4); background: rgba(255, 59, 48, 0.07); }
+
+/* hash lab */
+.fair__labinput {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 11px 14px;
+}
+.fair__labinput:focus { outline: none; border-color: var(--border-focus); box-shadow: var(--shadow-glow); }
+.fair__labhash {
+  margin-top: 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-mono);
+}
+.fair__labarrow { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.fair__labhash code { font-size: 13px; color: var(--accent); word-break: break-all; }
+
+/* odds table */
+.fair__oddswrap { overflow-x: auto; }
+.fair__oddstable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fair__oddstable th {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.fair__oddstable td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  vertical-align: top;
+}
+.fair__oddstable td:first-child { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
+.fair__oddstable td:last-child { white-space: nowrap; }
+.fair__oddstable code { font-family: var(--font-mono); font-size: 11.5px; color: var(--accent); }
+
+@media (max-width: 720px) {
+  .fair__steps { grid-template-columns: 1fr; }
+  .fairround__actions { margin-left: 0; width: 100%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app::after,
   .hdr::after,
@@ -1409,4 +1731,6 @@
   .wallart__piece {
     animation: none !important;
   }
+  /* .fairstep2/.fairverdict stay animated: they reveal content (start at
+     opacity 0), same call as the game reveals above this block. */
 }

@@ -1,15 +1,31 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Arcade } from './Arcade';
 import { ConnectWallet } from './ConnectWallet';
+import { Fairness } from './Fairness';
 import { Card, Coin, Die, HandScissors, PlinkoMark } from './arcade/art';
 import { isMuted, setMuted, sfx } from './arcade/sound';
 
+/** Tiny hash router — `#/fairness` is the only other room in the house. */
+function useRoute(): string {
+  const [route, setRoute] = useState(() => window.location.hash);
+  useEffect(() => {
+    const onHash = () => {
+      setRoute(window.location.hash);
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  return route;
+}
+
 export function App() {
+  const route = useRoute();
   return (
     <div className="app">
       <WallArt />
       <Header />
-      <Arcade />
+      {route === '#/fairness' ? <Fairness /> : <Arcade />}
       <Footer />
     </div>
   );
@@ -54,6 +70,9 @@ function Header() {
         <div className="hdr__sub">Provably-fair games · on-chain payouts</div>
       </div>
       <div className="hdr__right">
+        <a className="hdr__fair" href="#/fairness" title="verify any round yourself">
+          fairness
+        </a>
         <MuteButton />
         <span className="hdr__net">testnet2</span>
         <ConnectWallet />
@@ -91,7 +110,12 @@ function Footer() {
   return (
     <footer className="footer">
       <span className="footer__brand">Unicity Arcade House</span>
-      <span>Provably-fair games, on-chain payouts</span>
+      <span>
+        <a className="footer__fair" href="#/fairness">
+          Provably-fair games
+        </a>
+        , on-chain payouts
+      </span>
       <span>Built on the Sphere SDK · testnet2</span>
     </footer>
   );
