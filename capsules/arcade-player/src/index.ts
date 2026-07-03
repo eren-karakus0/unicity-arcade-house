@@ -162,24 +162,36 @@ interface Fairness {
   allOk: boolean;
 }
 
-function verifyFairness(game: GameId, r: PlayResult): Fairness {
-  const commitOk = sha256Hex(`${r.secret}:${r.nonce}`) === r.commit;
+function verifyFairness(game: GameId, r: PlayResult, precommit: string, sentChoice: unknown): Fairness {
+  // Pre-commit binding: the reveal must open the SAME commitment we were handed
+  // at round open — not merely a commit the reveal echoes to itself. Without this
+  // the check is self-referential and a dishonest house could pick its secret
+  // after seeing our choice and return a self-consistent (secret,nonce,commit).
+  const commitOk =
+    r.commit === precommit && sha256Hex(`${r.secret}:${r.nonce}`) === r.commit;
 
   let gameOk = true;
   const rv = r.reveal;
+  // Seed pinning: for seed-derived games the client seed used in the derivation
+  // must be the exact value we sent, or the house could grind a favorable seed
+  // and echo it back.
+  const seedPinned = String(rv.clientSeed) === String(sentChoice);
   if (game === "dice") {
     const h = sha256Hex(`${r.secret}:${String(rv.clientSeed)}`);
     gameOk =
+      seedPinned &&
       (parseInt(h.slice(0, 8), 16) % 6) + 1 === Number(rv.dealerRoll) &&
       (parseInt(h.slice(8, 16), 16) % 6) + 1 === Number(rv.playerRoll);
   } else if (game === "wheel") {
     const segs = (rv.segments as number[] | undefined) ?? [];
     const h = sha256Hex(`${r.secret}:${String(rv.clientSeed)}`);
-    gameOk = segs.length > 0 && parseInt(h.slice(0, 8), 16) % segs.length === Number(rv.segmentIndex);
+    gameOk =
+      seedPinned && segs.length > 0 && parseInt(h.slice(0, 8), 16) % segs.length === Number(rv.segmentIndex);
   } else if (game === "plinko") {
     const path = (rv.path as number[] | undefined) ?? [];
     const h = sha256Hex(`${r.secret}:${String(rv.clientSeed)}`);
     gameOk =
+      seedPinned &&
       path.length > 0 &&
       path.every((bit, i) => (parseInt(h[i]!, 16) & 1) === bit) &&
       path.reduce((a, b) => a + b, 0) === Number(rv.bucketIndex);
@@ -220,7 +232,7 @@ function playOne(game: GameId, bet: number): RoundReport {
     name: NAME,
   });
   if (!pr.reveal) throw new Error(pr.error ?? "play failed");
-  const fair = verifyFairness(game, pr);
+  const fair = verifyFairness(game, pr, nr.commit, choice);
   if (!fair.allOk) log.warn(`FAIRNESS CHECK FAILED on ${game}: ${JSON.stringify(fair)}`);
   return {
     game,
@@ -242,8 +254,12 @@ export class ArcadePlayer {
   roundsPlayed = 0;
   netUct = 0;
 
-  /** House status + this capsule's balance at the arcade. */
-  @tool("status")
+  /**
+   * House status + this capsule's balance at the arcade. Marked mutable so the
+   * bridge hydrates the persisted instance state (roundsPlayed/netUct) before the
+   * call — non-mutable tools get a fresh instance and would always report zero.
+   */
+  @tool("status", { mutable: true })
   status(_args: object): {
     house: string | null;
     jackpotUct: number | null;
