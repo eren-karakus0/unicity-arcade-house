@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { writeFileSync } from 'node:fs';
 import {
   Sphere,
   getCoinIdBySymbol,
@@ -12,6 +13,8 @@ import { Logger, createLogger } from './logger.js';
 import type { NetworkType } from './config.js';
 
 const UCT = 'UCT';
+/** SDK default when a token's decimals can't be resolved (mirrors DEFAULT_TOKEN_DECIMALS). */
+const DEFAULT_UCT_DECIMALS = 18;
 
 export interface SphereAgentOptions {
   /** Logical name, e.g. 'analyst' — used for logs, deviceId, data dir. */
@@ -60,8 +63,14 @@ export class SphereAgent {
   }
 
   async start(): Promise<{ created: boolean; mnemonic?: string }> {
+    // This wrapper targets testnet2 end-to-end (the wallet-api rails and
+    // Sphere.init below are testnet2); 'testnet' is the SDK's alias for it.
+    // Normalize so the base providers can't drift onto a different network id
+    // than the rails.
+    const network: NetworkType =
+      this.opts.network === 'testnet' ? 'testnet2' : (this.opts.network ?? 'testnet2');
     const base = createNodeProviders({
-      network: this.opts.network ?? 'testnet',
+      network,
       dataDir: this.opts.dataDir,
       tokensDir: path.join(this.opts.dataDir, 'tokens'),
       oracle: { apiKey: this.opts.oracleApiKey },
@@ -86,7 +95,7 @@ export class SphereAgent {
       ? { ...common, mnemonic: this.opts.mnemonic }
       : { ...common, autoGenerate: true as const };
 
-    this.log.info(`starting wallet @${this.desiredNametag} on ${this.opts.network ?? 'testnet'}…`);
+    this.log.info(`starting wallet @${this.desiredNametag} on ${network}…`);
     const { sphere, created, generatedMnemonic } = await Sphere.init(initOptions);
     this.inner = sphere;
 
@@ -100,8 +109,17 @@ export class SphereAgent {
     this.log.info(`ready — @${this.nametag}  addr=${this.directAddress?.slice(0, 24)}…`);
     this.log.info(`modules: market=${!!sphere.market} swap=${!!sphere.swap} groupChat=${!!sphere.groupChat}`);
     if (created && generatedMnemonic) {
-      this.log.warn(`NEW wallet. Save to .env as ${this.name.toUpperCase()}_MNEMONIC:`);
-      this.log.warn(`  ${generatedMnemonic}`);
+      // Never print a live mnemonic to stdout/stderr — hosting logs are retained
+      // and often exportable. Persist it beside the wallet's own key storage (the
+      // dataDir already holds secrets and is gitignored) and log only the path.
+      const secretPath = path.join(this.opts.dataDir, 'mnemonic.txt');
+      const envKey = `${this.name.toUpperCase()}_MNEMONIC`;
+      try {
+        writeFileSync(secretPath, `${generatedMnemonic}\n`, { encoding: 'utf8', mode: 0o600 });
+        this.log.warn(`NEW wallet generated — mnemonic written to ${secretPath}. Copy it into .env as ${envKey}, then delete the file.`);
+      } catch {
+        this.log.warn(`NEW wallet generated — set ${envKey} in .env (mnemonic withheld from logs).`);
+      }
     }
     return { created, mnemonic: generatedMnemonic };
   }
@@ -118,7 +136,7 @@ export class SphereAgent {
 
   /** UCT coin id (hex) + decimals — e.g. for building wallet send-intents. */
   get uctCoin(): { coinId: string; decimals: number } {
-    return { coinId: this.uctCoinId, decimals: this.uctDecimals ?? 0 };
+    return { coinId: this.uctCoinId, decimals: this.uctDecimals ?? DEFAULT_UCT_DECIMALS };
   }
 
   // ---- amount helpers (human UCT string/number <-> smallest-unit) ----
@@ -141,7 +159,7 @@ export class SphereAgent {
     const to = this.normalizeRecipient(recipient);
     this.log.info(`sending ${human} UCT → ${to.slice(0, 28)}…`);
     return this.sphere.payments.send({
-      coinId: UCT,
+      coinId: this.uctCoinId,
       amount: this.toSmallest(human),
       recipient: to,
       ...(memo ? { memo } : {}),
@@ -181,7 +199,7 @@ export class SphereAgent {
       fromNametag.startsWith('@') ? fromNametag : `@${fromNametag}`,
       {
         amount: this.toSmallest(human),
-        coinId: UCT,
+        coinId: this.uctCoinId,
         recipientNametag: this.nametag.replace(/^@/, ''),
         message,
       },

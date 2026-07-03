@@ -49,7 +49,7 @@ export function loadEnv(): BazaarEnv {
   };
 
   return {
-    network: (clean(process.env.SPHERE_NETWORK) as NetworkType) ?? 'testnet',
+    network: (clean(process.env.SPHERE_NETWORK) as NetworkType) ?? 'testnet2',
     oracleApiKey: clean(process.env.SPHERE_ORACLE_API_KEY) ?? PUBLIC_TESTNET2_KEY,
     walletApiUrl: clean(process.env.SPHERE_WALLET_API_URL) ?? DEFAULT_WALLET_API_URL,
     analyst: {
