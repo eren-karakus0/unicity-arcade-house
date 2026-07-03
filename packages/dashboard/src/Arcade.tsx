@@ -897,7 +897,9 @@ const gameTitle = (games: GameMeta[], id?: string) => games.find((g) => g.id ===
 
 /** Scrolling strip of real recent payouts from the house feed. */
 function HouseTicker({ feed, games }: { feed: HouseEvent[]; games: GameMeta[] }) {
-  const wins = feed.filter((e) => e.kind !== 'mint').slice(0, 8);
+  // This strip is specifically "live payouts" — mints and incoming deposits
+  // aren't payouts, so keep them out of it.
+  const wins = feed.filter((e) => e.kind !== 'mint' && e.kind !== 'deposit').slice(0, 8);
   if (wins.length === 0) return null;
   const items = (dup: boolean) =>
     wins.map((w, i) => (
@@ -963,13 +965,15 @@ function HousePanel({
               <span>
                 {e.kind === 'mint'
                   ? `treasury low — the agent minted itself +${e.amountUct} UCT`
-                  : e.kind === 'jackpot'
-                    ? `JACKPOT — paid @${e.name} the whole ${e.amountUct} UCT pot · ${gameTitle(games, e.game)}`
-                    : e.kind === 'tournament'
-                      ? `TOURNAMENT — paid champion @${e.name} the ${e.amountUct} UCT prize`
-                      : e.kind === 'cashout'
-                        ? `cashed @${e.name} out — ${e.amountUct} UCT sent on-chain`
-                        : `paid @${e.name} +${e.amountUct} UCT · ${gameTitle(games, e.game)}`}
+                  : e.kind === 'deposit'
+                    ? `@${e.name} bought in — ${e.amountUct} UCT deposited on-chain`
+                    : e.kind === 'jackpot'
+                      ? `JACKPOT — paid @${e.name} the whole ${e.amountUct} UCT pot · ${gameTitle(games, e.game)}`
+                      : e.kind === 'tournament'
+                        ? `TOURNAMENT — paid champion @${e.name} the ${e.amountUct} UCT prize`
+                        : e.kind === 'cashout'
+                          ? `cashed @${e.name} out — ${e.amountUct} UCT sent on-chain`
+                          : `paid @${e.name} +${e.amountUct} UCT · ${gameTitle(games, e.game)}`}
               </span>
               <span className="hevent__t">{timeAgo(e.at)}</span>
             </div>
