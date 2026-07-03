@@ -55,6 +55,18 @@ two — so neither side can steer the roll. The browser re-derives it to verify.
 On a win the house pays out from its treasury; the UI shows the real on-chain
 transfer id and its delivery state.
 
+### Keep playing — progression, a live tournament, and referrals
+
+- **Achievements** — ten badges (first win, streak milestones, play-all-games,
+  high roller, jackpot, …); several grant a small UCT bonus on unlock.
+- **Rolling tournament** — a recurring window where players race on net UCT won.
+  When it closes the house **crowns the top scorer and pays a prize on-chain,
+  autonomously** — no operator crowns anyone.
+- **Referrals** — every player gets an invite link; when a friend connects and
+  plays, the house pays both sides real UCT.
+- **Provably-fair verifier** — a [`/#/fairness`](https://unicity-arcade-house.vercel.app/#/fairness)
+  page re-runs the commit-reveal math on your own rounds, in your browser.
+
 ## Under the hood — built exclusively on the Sphere SDK
 
 Every on-chain and identity operation in this project goes through
