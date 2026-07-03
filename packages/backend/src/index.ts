@@ -214,7 +214,9 @@ const server = http.createServer((req, res) => {
         const address = typeof body.address === 'string' ? body.address : undefined;
         json(res, 200, dealer!.newRound(game, address));
       } catch (e) {
-        json(res, 429, { error: e instanceof Error ? e.message : 'could not start a round' });
+        const msg = e instanceof Error ? e.message : 'could not start a round';
+        // The cooldown throttle is a 429; an invalid game is a 400.
+        json(res, msg.startsWith('Easy there') ? 429 : 400, { error: msg });
       }
     });
     return;
