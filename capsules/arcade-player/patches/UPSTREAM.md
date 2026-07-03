@@ -1,6 +1,15 @@
 # Upstream bug report — @unicity-astrid/sdk 0.1.0 (sdk-js)
 
-Filed upstream: [unicity-astrid/sdk-js#20](https://github.com/unicity-astrid/sdk-js/issues/20) (2026-07-03).
+Filed upstream: [unicity-astrid/sdk-js#20](https://github.com/unicity-astrid/sdk-js/issues/20) (issue) and
+[unicity-astrid/sdk-js#21](https://github.com/unicity-astrid/sdk-js/pull/21) (fix PR) — 2026-07-03.
+
+> **Note on the two fixes.** [`patch-sdk.mjs`](../patch-sdk.mjs) patches the *published dist* with a
+> minimal warm-up (construct once before the bridge reads) so this repo builds today. The upstream
+> PR #21 uses a cleaner root-cause fix on the *source*: member decorators defer their registration
+> onto a module-scoped queue and `@capsule` flushes it — no construction needed, and it also fixes
+> the per-instance re-registration flagged in #18. Verified by compiling with the package's own tsc
+> and reading the registry the way the bridge does (populated at decoration time, no construction),
+> plus a full-package `tsc --noEmit`.
 
 ## Title
 
