@@ -2,7 +2,7 @@
  * Achievements UI — a badge board and a one-time unlock toast. Badge art is
  * inline SVG (no emoji dependency), matching the arcade's orange-on-black kit.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AchievementView } from '../lib/arcade';
 
 type IconName = AchievementView['icon'];
@@ -109,17 +109,28 @@ export function AchievementsPanel({ items }: { items: AchievementView[] }) {
  */
 export function AchievementToast({ queue, onShown }: { queue: AchievementView[]; onShown: (id: string) => void }) {
   const [current, setCurrent] = useState<AchievementView | null>(null);
+  // Keep onShown in a ref so its identity churn (a fresh closure every parent
+  // render) can't cancel the dismissal timer below.
+  const onShownRef = useRef(onShown);
+  onShownRef.current = onShown;
 
+  // Pull the next badge off the queue whenever nothing is currently showing.
   useEffect(() => {
     if (current || queue.length === 0) return;
-    const next = queue[0]!;
-    setCurrent(next);
+    setCurrent(queue[0]!);
+  }, [queue, current]);
+
+  // Show the current badge for a beat, then dismiss so the queue can advance.
+  // Keyed on `current` only, so re-renders don't reschedule/cancel the timer.
+  useEffect(() => {
+    if (!current) return;
+    const id = current.id;
     const t = setTimeout(() => {
-      onShown(next.id);
+      onShownRef.current(id);
       setCurrent(null);
     }, 4200);
     return () => clearTimeout(t);
-  }, [queue, current, onShown]);
+  }, [current]);
 
   if (!current) return null;
   return (
