@@ -31,4 +31,12 @@ export const GAME_LIST: readonly Game[] = [
   numberGame,
 ];
 
-export const GAMES: Record<string, Game> = Object.fromEntries(GAME_LIST.map((g) => [g.id, g]));
+// Null-prototype map so a lookup like GAMES['__proto__'] resolves to undefined
+// (and hits the "Unknown game" guard) instead of inheriting Object.prototype.
+export const GAMES: Record<string, Game> = GAME_LIST.reduce<Record<string, Game>>(
+  (acc, g) => {
+    acc[g.id] = g;
+    return acc;
+  },
+  Object.create(null),
+);
