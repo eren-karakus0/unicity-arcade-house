@@ -72,6 +72,10 @@ async function boot(): Promise<void> {
     dealerRef.restore(restored);
     log.info(`restored arcade state (${restored.players?.length ?? 0} players)`);
   }
+  // Pay any tournament prizes that were crowned but never confirmed on-chain
+  // before the last shutdown (e.g. the free-tier host slept at the window
+  // boundary). The agent is already started, so these settle in the background.
+  dealerRef.retryPendingPrizes();
   // Only write when the snapshot actually changed - idle periods make no writes,
   // so the Neon Postgres instance can auto-suspend (keeps free-tier compute low).
   let lastSaved = '';
@@ -85,6 +89,9 @@ async function boot(): Promise<void> {
   }, 10_000);
   const shutdown = () => {
     void (async () => {
+      // Let in-flight on-chain payouts (e.g. a just-crowned tournament prize)
+      // land so the final snapshot records them, then persist and exit.
+      await dealerRef.flushPayouts();
       await store.save(dealerRef.snapshot());
       await store.close();
       process.exit(0);

@@ -201,14 +201,37 @@ export interface HouseStats {
   jackpotUct: number;
   /** Newest first, capped. */
   feed: HouseEvent[];
+  /** Tournament prizes crowned but awaiting on-chain confirmation (retried on boot). */
+  pendingPrizes: { name: string; amountUct: number; tries: number; lastError?: string }[];
+}
+
+/**
+ * A tournament prize that has been crowned but not yet confirmed paid on-chain.
+ * Persisted so a champion is still paid across a restart — the free-tier host
+ * can sleep at the 15-min window boundary, exactly when a window closes, and a
+ * plain fire-and-forget send would be lost. retryPendingPrizes() re-attempts it
+ * on boot. Delivery is at-least-once: a prize that landed but was not yet
+ * persisted as removed could pay twice — an acceptable testnet trade against
+ * never paying at all.
+ */
+export interface PendingPrize {
+  /** Stable id = `tourney-<windowCloseMs>`; dedups the crown and every retry. */
+  id: string;
+  address: string;
+  amount: number;
+  name: string;
+  at: number;
+  tries: number;
+  lastError?: string;
 }
 
 /**
  * Durable house state — everything that must survive a restart: player balances
  * and stats, the leaderboard, referral graph, the seen-deposit set (so deposits
- * are not re-credited), the jackpot pot, house tallies, and the tournament.
- * Transient state (open rounds, cooldowns, in-flight payouts) is left out;
- * on-chain settlement is the source of truth for those.
+ * are not re-credited), the jackpot pot, house tallies, the tournament, and any
+ * tournament prizes still owed on-chain. Transient state (open rounds,
+ * cooldowns, in-flight payouts) is left out; on-chain settlement is the source
+ * of truth for those.
  */
 export interface DealerSnapshot {
   players: [string, PlayerState][];
@@ -221,6 +244,8 @@ export interface DealerSnapshot {
   minted: number;
   feed: HouseEvent[];
   tournament: TournamentSnapshot;
+  /** Tournament prizes owed but not yet confirmed on-chain (retried on boot). */
+  pendingPrizes: PendingPrize[];
 }
 
 interface TxLike {
@@ -269,6 +294,10 @@ export class GameDealer {
   private readonly tourney: Tournament;
   /** referral code → player key, so a referee's code resolves to the referrer. */
   private readonly referralCodes = new Map<string, string>();
+  /** Tournament prizes owed on-chain, keyed by prize id — durable + retried on boot. */
+  private readonly pendingPrizes = new Map<string, PendingPrize>();
+  /** Prize ids with a send in flight, so a retry never double-enqueues. */
+  private readonly payingPrizes = new Set<string>();
 
   constructor(opts: GameDealerOptions) {
     this.agent = opts.agent;
@@ -555,12 +584,55 @@ export class GameDealer {
     return this.tourney.view(now);
   }
 
-  /** Close any elapsed tournament windows and pay each champion on-chain. */
+  /**
+   * Close any elapsed tournament windows. Each champion's prize is recorded in
+   * the durable pending-prize ledger *before* the on-chain send, so a restart
+   * (or a free-tier sleep at the window boundary) can't lose it —
+   * retryPendingPrizes() re-attempts anything still owed on boot.
+   */
   private settleTournament(now: number): void {
     for (const c of this.tourney.maybeRoll(now)) {
+      const id = `tourney-${c.at}`;
+      if (!this.pendingPrizes.has(id)) {
+        this.pendingPrizes.set(id, { id, address: c.address, amount: c.prize, name: c.name, at: c.at, tries: 0 });
+      }
       this.log.info(`TOURNAMENT — @${c.name} took the ${c.prize} UCT prize (score ${c.score})`);
-      this.enqueueSettlement(`tourney-${c.at}`, c.address, c.prize, 'arcade-tournament', c.name, 'tournament');
+      this.payPrize(this.pendingPrizes.get(id)!);
     }
+  }
+
+  /** Send one owed prize on-chain; drop it on landing, keep + note it on failure. */
+  private payPrize(p: PendingPrize): void {
+    if (this.payingPrizes.has(p.id)) return; // a send for this prize is already in flight
+    this.payingPrizes.add(p.id);
+    this.enqueueSettlement(
+      p.id,
+      p.address,
+      p.amount,
+      'arcade-tournament',
+      p.name,
+      'tournament',
+      (error) => {
+        // Keep it pending for the next retry; record why it failed (surfaced in houseStats).
+        const cur = this.pendingPrizes.get(p.id);
+        if (cur) this.pendingPrizes.set(p.id, { ...cur, tries: cur.tries + 1, ...(error ? { lastError: error } : {}) });
+        this.payingPrizes.delete(p.id);
+      },
+      () => {
+        // Delivered — retire it from the durable ledger.
+        this.pendingPrizes.delete(p.id);
+        this.payingPrizes.delete(p.id);
+      },
+    );
+  }
+
+  /**
+   * Re-attempt tournament prizes that were crowned but never confirmed on-chain
+   * (the process slept before the send landed). Call once on boot, after
+   * restore() and after the agent is started. Delivery is at-least-once.
+   */
+  retryPendingPrizes(): void {
+    for (const p of this.pendingPrizes.values()) this.payPrize(p);
   }
 
   /** The player's in-house UCT balance. */
@@ -664,6 +736,12 @@ export class GameDealer {
       selfMintedUct: this.minted,
       jackpotUct: this.pot,
       feed: this.feed.slice(0, 12),
+      pendingPrizes: [...this.pendingPrizes.values()].map((p) => ({
+        name: p.name,
+        amountUct: p.amount,
+        tries: p.tries,
+        ...(p.lastError ? { lastError: p.lastError } : {}),
+      })),
     };
   }
 
@@ -684,6 +762,7 @@ export class GameDealer {
       minted: this.minted,
       feed: [...this.feed],
       tournament: this.tourney.snapshot(),
+      pendingPrizes: [...this.pendingPrizes.values()],
     };
   }
 
@@ -715,6 +794,10 @@ export class GameDealer {
     if (typeof snap.roundsPlayed === 'number') this.roundsPlayed = snap.roundsPlayed;
     if (typeof snap.minted === 'number') this.minted = snap.minted;
     if (Array.isArray(snap.feed)) this.feed = [...snap.feed];
+    if (Array.isArray(snap.pendingPrizes)) {
+      this.pendingPrizes.clear();
+      for (const p of snap.pendingPrizes) this.pendingPrizes.set(p.id, p);
+    }
     this.tourney.restore(snap.tournament);
   }
 
@@ -762,7 +845,8 @@ export class GameDealer {
     memo: string,
     name: string,
     game: string,
-    onFail?: () => void,
+    onFail?: (error?: string) => void,
+    onLand?: () => void,
   ): void {
     this.settlements.set(key, { status: 'pending', amountUct: amount, at: Date.now() });
     const run = (async () => {
@@ -785,6 +869,7 @@ export class GameDealer {
                 ? 'tournament'
                 : 'win';
         this.pushEvent({ kind, at: Date.now(), amountUct: amount, name, game });
+        onLand?.();
       } catch (e) {
         const error = e instanceof Error ? e.message : 'payout failed';
         this.settlements.set(key, { status: 'failed', amountUct: amount, error, at: Date.now() });
@@ -796,7 +881,7 @@ export class GameDealer {
         if (memo === 'arcade-jackpot') {
           this.pot = Math.min(this.jackpotCap, this.pot + amount - this.jackpotSeed);
         }
-        onFail?.();
+        onFail?.(error);
       }
       this.pruneSettlements();
     })();

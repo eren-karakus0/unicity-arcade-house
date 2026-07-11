@@ -444,6 +444,56 @@ describe('tournament — dealer wiring', () => {
     const stats = await dealer.houseStats();
     expect(stats.feed.some((e) => e.kind === 'tournament')).toBe(true);
   });
+
+  it('keeps a crowned prize pending on a failed send and pays it on retry (durable)', async () => {
+    // A send that fails until flipped live — models the process losing the
+    // fire-and-forget payout, then a later boot re-attempting it.
+    let live = false;
+    const sent: { address: string; amount: number; memo?: string }[] = [];
+    const flaky = {
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async (address: string, amount: number, memo?: string) => {
+        if (!live) throw new Error('testnet down');
+        sent.push({ address, amount, memo });
+        return { id: `tx-${sent.length}`, deliveryState: 'landed' };
+      },
+    } as unknown as SphereAgent;
+    const opts = { cooldownMs: 0, jackpotOdds: 1_000_000_000, tournamentLengthMs: 50, tournamentPrizeUct: 25 };
+    const dealer = new GameDealer({ agent: flaky, ...opts });
+    dealer.creditDeposit({ id: 'seed-t3', amountBase: '20000', senderPubkey: '@t3' });
+    for (let i = 0; i < 60; i++) {
+      const nr = dealer.newRound('coin', '@t3');
+      const r = await dealer.play({ roundId: nr.roundId, choice: 'heads', bet: 1, playerAddress: '@t3', name: 't3' });
+      if (r.outcome === 'win') break;
+    }
+    await new Promise((r) => setTimeout(r, 70)); // let the window elapse
+    dealer.newRound('coin', '@t3'); // rolls the window → prize enqueued, send fails
+    await dealer.flushPayouts();
+
+    // Nothing paid, but the prize is owed and the failure is visible for diagnosis.
+    const owed = (await dealer.houseStats()).pendingPrizes;
+    expect((await dealer.houseStats()).paidOutUct).toBe(0);
+    expect(owed.length).toBeGreaterThanOrEqual(1);
+    expect(owed.some((p) => p.name === 't3' && p.amountUct === 25)).toBe(true);
+    expect(owed.every((p) => p.tries >= 1 && !!p.lastError)).toBe(true);
+
+    // The owed prize survives a restart: snapshot → restore into a fresh dealer,
+    // then a retry (with the chain back) pays it and clears the ledger.
+    expect(dealer.snapshot().pendingPrizes.length).toBeGreaterThanOrEqual(1);
+    const rebooted = new GameDealer({ agent: flaky, ...opts });
+    rebooted.restore(dealer.snapshot());
+    live = true;
+    rebooted.retryPendingPrizes();
+    await rebooted.flushPayouts();
+    const after = await rebooted.houseStats();
+    expect(sent.some((s) => s.memo === 'arcade-tournament' && s.amount === 25)).toBe(true);
+    expect(after.paidOutUct).toBeGreaterThanOrEqual(25);
+    expect(after.pendingPrizes).toHaveLength(0);
+  });
 });
 
 describe('referral — dealer wiring', () => {
