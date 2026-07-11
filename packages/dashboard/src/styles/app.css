@@ -619,6 +619,44 @@
 .brow__name { color: var(--text-primary); word-break: break-all; }
 .brow__wl { color: var(--text-muted); font-size: 11px; }
 .brow__earned { color: var(--accent); }
+.board__pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.board__pg {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: 0.15s;
+}
+.board__pg:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+.board__pg:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.board__pgnum {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  min-width: 44px;
+  text-align: center;
+}
 .arcade__chip--house { display: inline-flex; align-items: center; gap: 6px; }
 .commit strong { color: var(--text-secondary); font-weight: 600; }
 .commit__hash {

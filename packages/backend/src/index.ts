@@ -190,7 +190,7 @@ const server = http.createServer((req, res) => {
         house: dealer!.house,
         baseRewardUct: dealer!.baseRewardUct,
         games: ARCADE_GAMES,
-        rows: dealer!.leaderboard(),
+        rows: dealer!.leaderboard(100),
         daily: dealer!.dailyInfo(),
         deposit: dealer!.depositInfo(),
         houseStats,

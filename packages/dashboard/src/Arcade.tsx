@@ -830,28 +830,7 @@ export function Arcade() {
       <TournamentPanel view={tourney} />
 
       <div className="arcade__duo">
-        <div className="board">
-          <div className="board__head">
-            <span className="board__title">Leaderboard</span>
-            <span className="board__note">top players · all games</span>
-          </div>
-          {board.length === 0 ? (
-            <div className="empty">No games yet — be the first to beat the house.</div>
-          ) : (
-            <div className="board__rows">
-              {board.map((r, i) => (
-                <div className="brow" key={r.name}>
-                  <span className="brow__rank">{i + 1}</span>
-                  <span className="brow__name">@{r.name}</span>
-                  <span className="brow__wl">
-                    {r.wins}W · {r.losses}L · {r.ties}T
-                  </span>
-                  <span className="brow__earned">{r.earnedUct} UCT</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <LeaderboardPanel rows={board} />
 
         <HousePanel stats={houseStats} house={house} games={games} />
       </div>
@@ -880,6 +859,67 @@ function JackpotSign({ pot }: { pot: number | null }) {
         <br />
         hit it, the agent pays the pot
       </span>
+    </div>
+  );
+}
+
+const LEADER_PER_PAGE = 8;
+
+/** Leaderboard with client-side paging (prev/next) once it grows past one page. */
+function LeaderboardPanel({ rows }: { rows: LeaderRow[] }) {
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(rows.length / LEADER_PER_PAGE));
+  const p = Math.min(page, pageCount - 1);
+  const visible = rows.slice(p * LEADER_PER_PAGE, p * LEADER_PER_PAGE + LEADER_PER_PAGE);
+  return (
+    <div className="board">
+      <div className="board__head">
+        <span className="board__title">Leaderboard</span>
+        <span className="board__note">top players · all games</span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="empty">No games yet — be the first to beat the house.</div>
+      ) : (
+        <>
+          <div className="board__rows">
+            {visible.map((r, i) => (
+              <div className="brow" key={r.name}>
+                <span className="brow__rank">{p * LEADER_PER_PAGE + i + 1}</span>
+                <span className="brow__name">@{r.name}</span>
+                <span className="brow__wl">
+                  {r.wins}W · {r.losses}L · {r.ties}T
+                </span>
+                <span className="brow__earned">{r.earnedUct} UCT</span>
+              </div>
+            ))}
+          </div>
+          {rows.length > LEADER_PER_PAGE && (
+            <div className="board__pager">
+              <button
+                type="button"
+                className="board__pg"
+                onClick={() => setPage((x) => Math.max(0, x - 1))}
+                disabled={p === 0}
+                aria-label="Previous page"
+              >
+                ‹
+              </button>
+              <span className="board__pgnum">
+                {p + 1} / {pageCount}
+              </span>
+              <button
+                type="button"
+                className="board__pg"
+                onClick={() => setPage((x) => Math.min(pageCount - 1, x + 1))}
+                disabled={p >= pageCount - 1}
+                aria-label="Next page"
+              >
+                ›
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
