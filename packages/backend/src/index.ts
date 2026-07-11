@@ -72,8 +72,16 @@ async function boot(): Promise<void> {
     dealerRef.restore(restored);
     log.info(`restored arcade state (${restored.players?.length ?? 0} players)`);
   }
+  // Only write when the snapshot actually changed - idle periods make no writes,
+  // so the Neon Postgres instance can auto-suspend (keeps free-tier compute low).
+  let lastSaved = '';
   setInterval(() => {
-    void store.save(dealerRef.snapshot());
+    void (async () => {
+      const snap = dealerRef.snapshot();
+      const json = JSON.stringify(snap);
+      if (json === lastSaved) return;
+      if (await store.save(snap)) lastSaved = json;
+    })();
   }, 10_000);
   const shutdown = () => {
     void (async () => {
