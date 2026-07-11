@@ -10,7 +10,8 @@
  */
 import http from 'node:http';
 import path from 'node:path';
-import { loadEnv, SphereAgent, GameDealer, GAME_LIST, createLogger } from '@bazaar/core';
+import { loadEnv, SphereAgent, GameDealer, GAME_LIST, createLogger, type DealerSnapshot } from '@bazaar/core';
+import { createSnapshotStore } from './store.js';
 
 const PORT = Number(process.env.PORT ?? process.env.BACKEND_PORT ?? 4500);
 const env = loadEnv();
@@ -47,14 +48,42 @@ async function boot(): Promise<void> {
   // (the free-tier host may sleep after ~15 min idle). Tunable via env.
   const tourneyMin = Number(process.env.ARCADE_TOURNAMENT_MINUTES ?? '15');
   const tourneyPrize = Number(process.env.ARCADE_TOURNAMENT_PRIZE_UCT ?? '25');
-  dealer = new GameDealer({
+  const dealerRef = new GameDealer({
     agent: houseAgent,
     cooldownMs: 800,
     tournamentLengthMs: Math.max(1, tourneyMin) * 60_000,
     tournamentPrizeUct: Math.max(0, tourneyPrize),
     logger: createLogger('dealer'),
   });
-  await dealer.start();
+  dealer = dealerRef;
+  await dealerRef.start();
+
+  // Durable persistence: Postgres when DATABASE_URL is set, else a JSON file.
+  // Restore BEFORE the first deposit sweep so restored balances + the seen-
+  // deposit set prevent any double-credit of already-processed deposits.
+  const store = await createSnapshotStore<DealerSnapshot>({
+    databaseUrl: process.env.DATABASE_URL,
+    file: path.join(env.dataRoot, 'arcade-state.json'),
+    logger: createLogger('persist'),
+  });
+  log.info(`persistence backend: ${store.kind}`);
+  const restored = await store.load();
+  if (restored) {
+    dealerRef.restore(restored);
+    log.info(`restored arcade state (${restored.players?.length ?? 0} players)`);
+  }
+  setInterval(() => {
+    void store.save(dealerRef.snapshot());
+  }, 10_000);
+  const shutdown = () => {
+    void (async () => {
+      await store.save(dealerRef.snapshot());
+      await store.close();
+      process.exit(0);
+    })();
+  };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
 
   // Deposits: the wallet-api rails deliver incoming tokens in the background,
   // and every delivery lands in the wallet history as a RECEIVED entry with

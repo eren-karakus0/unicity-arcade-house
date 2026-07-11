@@ -20,7 +20,7 @@ import {
   statsOf,
   type AchievementView,
 } from './achievements.js';
-import { Tournament, type TournamentView } from './tournament.js';
+import { Tournament, type TournamentView, type TournamentSnapshot } from './tournament.js';
 import { referralCode, normalizeCode, REFERRAL_BONUS_UCT, REFERRAL_WELCOME_UCT } from './referral.js';
 
 export interface GameDealerOptions {
@@ -201,6 +201,26 @@ export interface HouseStats {
   jackpotUct: number;
   /** Newest first, capped. */
   feed: HouseEvent[];
+}
+
+/**
+ * Durable house state — everything that must survive a restart: player balances
+ * and stats, the leaderboard, referral graph, the seen-deposit set (so deposits
+ * are not re-credited), the jackpot pot, house tallies, and the tournament.
+ * Transient state (open rounds, cooldowns, in-flight payouts) is left out;
+ * on-chain settlement is the source of truth for those.
+ */
+export interface DealerSnapshot {
+  players: [string, PlayerState][];
+  board: [string, LeaderRow][];
+  referralCodes: [string, string][];
+  seenDeposits: string[];
+  pot: number;
+  paidOut: number;
+  roundsPlayed: number;
+  minted: number;
+  feed: HouseEvent[];
+  tournament: TournamentSnapshot;
 }
 
 interface TxLike {
@@ -645,6 +665,57 @@ export class GameDealer {
       jackpotUct: this.pot,
       feed: this.feed.slice(0, 12),
     };
+  }
+
+  /**
+   * A serializable snapshot of the durable house state. Open rounds, cooldowns
+   * and in-flight settlements are intentionally omitted - they are short-lived
+   * and on-chain payouts are their source of truth.
+   */
+  snapshot(): DealerSnapshot {
+    return {
+      players: [...this.players],
+      board: [...this.board],
+      referralCodes: [...this.referralCodes],
+      seenDeposits: [...this.seenDeposits],
+      pot: this.pot,
+      paidOut: this.paidOut,
+      roundsPlayed: this.roundsPlayed,
+      minted: this.minted,
+      feed: [...this.feed],
+      tournament: this.tourney.snapshot(),
+    };
+  }
+
+  /**
+   * Rehydrate from a prior snapshot(). Call once, before serving traffic and
+   * before the first deposit sweep, so restored balances plus the seen-deposit
+   * set prevent any double-credit of already-processed deposits.
+   */
+  restore(snap: DealerSnapshot | null | undefined): void {
+    if (!snap) return;
+    if (Array.isArray(snap.players)) {
+      this.players.clear();
+      for (const [k, v] of snap.players) this.players.set(k, v);
+    }
+    if (Array.isArray(snap.board)) {
+      this.board.clear();
+      for (const [k, v] of snap.board) this.board.set(k, v);
+    }
+    if (Array.isArray(snap.referralCodes)) {
+      this.referralCodes.clear();
+      for (const [k, v] of snap.referralCodes) this.referralCodes.set(k, v);
+    }
+    if (Array.isArray(snap.seenDeposits)) {
+      this.seenDeposits.clear();
+      for (const id of snap.seenDeposits) this.seenDeposits.add(id);
+    }
+    if (typeof snap.pot === 'number') this.pot = snap.pot;
+    if (typeof snap.paidOut === 'number') this.paidOut = snap.paidOut;
+    if (typeof snap.roundsPlayed === 'number') this.roundsPlayed = snap.roundsPlayed;
+    if (typeof snap.minted === 'number') this.minted = snap.minted;
+    if (Array.isArray(snap.feed)) this.feed = [...snap.feed];
+    this.tourney.restore(snap.tournament);
   }
 
   // ---- internals ----

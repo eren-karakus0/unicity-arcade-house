@@ -39,6 +39,13 @@ export interface TournamentView {
   champions: TournamentChampion[];
 }
 
+/** Durable slice of the tournament: the live window (start + scores) + champions. */
+export interface TournamentSnapshot {
+  start: number;
+  scores: [string, { name: string; address?: string; score: number }][];
+  champions: TournamentChampion[];
+}
+
 interface Score {
   name: string;
   address: string | undefined;
@@ -111,7 +118,7 @@ export class Tournament {
       .map((s) => ({ name: s.name, score: s.score }));
   }
 
-  view(now: number): TournamentView {
+  view(_now: number): TournamentView {
     return {
       endsAt: this.start + this.len,
       lengthMs: this.len,
@@ -119,5 +126,30 @@ export class Tournament {
       standings: this.standings(),
       champions: [...this.champions],
     };
+  }
+
+  /** Serialize the live window (start + scores) and past champions for persistence. */
+  snapshot(): TournamentSnapshot {
+    return {
+      start: this.start,
+      scores: [...this.scores].map(
+        ([k, s]): [string, { name: string; address?: string; score: number }] => [
+          k,
+          { name: s.name, ...(s.address ? { address: s.address } : {}), score: s.score },
+        ],
+      ),
+      champions: [...this.champions],
+    };
+  }
+
+  /** Restore a prior window + champions. The configured length/prize are kept. */
+  restore(s: TournamentSnapshot | null | undefined): void {
+    if (!s) return;
+    if (typeof s.start === 'number') this.start = s.start;
+    this.scores.clear();
+    for (const [k, v] of s.scores ?? []) {
+      this.scores.set(k, { name: v.name, address: v.address, score: v.score });
+    }
+    this.champions = Array.isArray(s.champions) ? [...s.champions] : [];
   }
 }
