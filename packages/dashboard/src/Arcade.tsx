@@ -31,6 +31,7 @@ import {
 } from './lib/arcade';
 import { saveProof } from './lib/fairness';
 import { AchievementToast } from './arcade/Achievements';
+import { AstridPanel } from './arcade/Astrid';
 import { TournamentPanel } from './arcade/Tournament';
 import { GAME_UI, GAMES_META } from './arcade/games-ui';
 import { BotMark, Flame, LockMark, WheelFace } from './arcade/art';
@@ -834,6 +835,8 @@ export function Arcade() {
 
         <HousePanel stats={houseStats} house={house} games={games} />
       </div>
+
+      <AstridPanel />
 
       <AchievementToast queue={achQueue} onShown={(id) => setAchQueue((q) => q.filter((a) => a.id !== id))} />
     </section>

@@ -2322,3 +2322,92 @@
   /* .fairstep2/.fairverdict stay animated: they reveal content (start at
      opacity 0), same call as the game reveals above this block. */
 }
+
+/* ===== Autonomous Players (Astrid OS capsule) ===== */
+.astrid {
+  margin-top: 20px;
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(255, 111, 0, 0.05), var(--bg-surface) 55%);
+  padding: 18px 20px 20px;
+}
+.astrid__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.astrid__title {
+  display: block;
+  font-family: var(--font-display, inherit);
+  font-size: 18px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+.astrid__sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.astrid__badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  border: 1px solid var(--border-focus);
+  border-radius: 999px;
+  padding: 4px 11px;
+  white-space: nowrap;
+}
+.astrid__body {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.astrid__who {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.astrid__name {
+  font-family: var(--font-mono, monospace);
+  font-size: 15px;
+  color: var(--accent);
+}
+.astrid__record {
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.astrid__story {
+  margin: 0;
+  max-width: 72ch;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.astrid__story b {
+  color: var(--text-primary);
+}
+.astrid__links {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.astrid__links a {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.astrid__links a:hover {
+  text-decoration: underline;
+}

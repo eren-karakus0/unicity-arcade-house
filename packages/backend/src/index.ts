@@ -227,6 +227,35 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // The Astrid OS autonomous player: a curated view of the capsule's REAL
+  // traces at this arcade (balance + leaderboard row — nothing cosmetic),
+  // plus the runtime facts the "Autonomous Players" showcase narrates.
+  if (pathname === '/api/arcade/astrid') {
+    if (!dealer) {
+      json(res, 200, { ready: false });
+      return;
+    }
+    const identity = '@astrid-arcade-capsule';
+    const board = dealer.leaderboard(200).find((r) => r.name === 'astrid-capsule') ?? null;
+    json(res, 200, {
+      ready: true,
+      identity,
+      name: 'astrid-capsule',
+      balanceUct: dealer.balanceOf(identity).balanceUct,
+      board,
+      runtime: {
+        kernel: 'Astrid OS 0.9.4 (WASM microkernel)',
+        sandbox: 'wasm32-wasip2 component in a Wasmtime sandbox',
+        network: 'capability-gated egress: this arcade backend only',
+        fairness: 'every provably-fair reveal re-verified in-capsule with its own SHA-256',
+      },
+      proofUrl:
+        'https://github.com/eren-karakus0/unicity-arcade-house/blob/main/capsules/arcade-player/PROOF.log',
+      docsUrl: 'https://github.com/eren-karakus0/unicity-arcade-house/blob/main/docs/ASTRID.md',
+    });
+    return;
+  }
+
   // The live tournament: countdown, standings, and past champions.
   if (pathname === '/api/arcade/tournament') {
     json(res, 200, dealer ? dealer.tournamentView() : { endsAt: 0, lengthMs: 0, prize: 0, standings: [], champions: [] });

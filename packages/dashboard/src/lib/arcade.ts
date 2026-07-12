@@ -217,6 +217,24 @@ export async function fetchTournament(): Promise<TournamentView> {
   return (await r.json()) as TournamentView;
 }
 
+/** The Astrid OS autonomous player's real traces + runtime facts. */
+export interface AstridView {
+  ready: boolean;
+  identity?: string;
+  name?: string;
+  balanceUct?: number;
+  board?: LeaderRow | null;
+  runtime?: { kernel: string; sandbox: string; network: string; fairness: string };
+  proofUrl?: string;
+  docsUrl?: string;
+}
+
+/** The Astrid capsule's curated view (Autonomous Players showcase). */
+export async function fetchAstrid(): Promise<AstridView> {
+  const r = await fetch(`${BACKEND_URL}/api/arcade/astrid`, { signal: AbortSignal.timeout(8_000) });
+  return (await r.json()) as AstridView;
+}
+
 export interface ReferralInfo {
   code: string | null;
   referrals: number;
