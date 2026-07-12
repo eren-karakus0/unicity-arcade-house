@@ -10,11 +10,13 @@ The [`arcade-player` capsule](./ASTRID.md) already plays the arcade autonomously
 from inside Astrid's WASM sandbox, re-verifying every provably-fair reveal with
 its own SHA-256. This track polishes it, upgrades it, and makes it visible.
 
-- [ ] **P1.T0 — Polish + kernel 0.9.4 + web showcase**
-  Capsule lint cleanup (no behavior change) · re-prove on astrid 0.9.4
-  (refresh PROOF.log, retry bus-routed tool dispatch) · an **Autonomous
-  Players** section in the web app showing the capsule's real leaderboard
-  trail and the sandbox/capability story.
+- [x] **P1.T0 — Polish + kernel 0.9.4 + web showcase** *(shipped 2026-07-12)*
+  Repo lint fully clean · capsule re-proved live on astrid **0.9.4** (stale
+  `astrid:process` import dropped — see UPSTREAM.md finding 2 — PROOF.log
+  refreshed with verified in-sandbox sessions) · **Autonomous Players** panel
+  live on the arcade page, backed by `GET /api/arcade/astrid` (real traces
+  only). Bus-routed dispatch remains upstream-blocked with a precise root
+  cause (sdk-js predates subscribe-driven delivery — UPSTREAM.md finding 3).
 - [ ] **P1.T1 — LLM strategist**
   The capsule *reasons* about game/bet/stop instead of picking randomly
   (kernel LLM binding if exposed to JS capsules, otherwise a capability-gated
