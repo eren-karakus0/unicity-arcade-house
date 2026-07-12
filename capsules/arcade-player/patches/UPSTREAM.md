@@ -96,11 +96,74 @@ The exact patch we apply on top of the published package:
   (`experimentalDecorators: false`, target ES2022), built via
   `astrid-js-build` → ComponentizeJS → wasm32-wasip2
 
-## Related observation (separate, minor)
+## Finding 2 (2026-07-12): stock JS capsules cannot install on kernels >= 0.9.1
+### `astrid:process/host@1.0.0` gone from the lifecycle linker
 
-astrid 0.9.1 fails to pre-instantiate JS capsules with
-`component imports instance astrid:process/host@1.0.0, but a matching
-implementation was not found in the linker` — the JS bundle always links every
-SDK module (esbuild keeps the side-effectful WIT imports), so kernels that
-gate host interfaces on capabilities can no longer load stock JS capsules.
-0.9.0 links it unconditionally and works.
+Confirmed on astrid **0.9.1 and 0.9.4** release binaries: installing any
+component built with the published JS packages fails with
+
+```
+lifecycle dispatch failed: Unsupported entry point: Failed to instantiate WASM
+component for lifecycle: component imports instance `astrid:process/host@1.0.0`,
+but a matching implementation was not found in the linker
+```
+
+The published `@unicity-astrid/build` 0.1.0 synthesizes a world importing
+`astrid:process/host@1.0.0`, and the SDK bridge unconditionally imports the
+specifier (esbuild keeps it — every JS capsule links every SDK module whether
+used or not). Kernels >= 0.9.1 register `process@1.1.0` but no longer register
+the 1.0.0 implementation in the lifecycle linker, so **every stock JS capsule
+is uninstallable on current kernels**. (The binary still contains the
+`astrid:process/host@1.0.0` string, so this may be an unintended registration
+gap rather than a deliberate drop.)
+
+**Fix that worked for us** (see `patch-sdk.mjs` section 3): drop the import on
+both sides — stub `spawn`/`spawnBackground` in `sdk/dist/process.js`, and
+remove `import astrid:process/host@1.0.0;` from the world template in
+`build/src/index.mjs`. Our capsule never spawns processes (the SDK itself
+documents `astrid:process` as optional per target). Component shrank
+13.10 MB / 170 host imports → 12.30 MB / 142, and installs + runs verified
+sessions on 0.9.4 (see ../PROOF.log sections [4]-[7]).
+
+Suggested upstream fixes: re-register the 1.0.0 shim in the lifecycle linker,
+or publish SDK/build packages targeting the current WITs, or make the build
+tree-shake host domains the capsule does not use.
+
+## Finding 3 (2026-07-12): JS SDK predates subscribe-driven topic delivery
+### bus-routed CLI verb dispatch never reaches a JS capsule on 0.9.4
+
+Setup that SHOULD work on astrid 0.9.4 (with Finding 2's patch applied):
+
+- `astrid-capsule-cli` 0.2.0 (prebuilt `.capsule`) installed — CLI verbs now
+  route through it, and its own manifest shows the current schema: topic
+  delivery is declared via `[publish]` / `[subscribe]` tables.
+- Provider-targeted run topic confirmed from capsule-cli source
+  (astrid#891): `cli.v1.command.run.<provider-id>` — matches our
+  `[[interceptor]] event = "cli.v1.command.run.arcade-player"`.
+- Our manifest declares `[subscribe] "cli.v1.command.run.arcade-player"` and
+  `[publish] "cli.v1.command.result.*"`.
+- `@run` loop healthy (see below), entry `log.info` added as the first line of
+  the interceptor handler.
+
+Result: `astrid capsule arcade status` times out after 70 s and the entry log
+**never appears** in the kernel log — the hook is never invoked. Meanwhile the
+Rust-SDK capsule (astrid-capsule-cli) demonstrably receives subscribed topics
+on the same kernel. Conclusion: the published JS SDK 0.1.0 predates the
+subscribe-driven delivery interface — it implements lifecycle hooks and the
+run loop (both work, PROOF.log), but not whatever guest export current kernels
+call to deliver bus topics. JS capsules therefore cannot receive tools/CLI
+dispatch until sdk-js ships that interface.
+
+### Sub-observation: a returned `@run` is treated as a crash
+
+An experiment returning from `@run` right after `runtime.signalReady()`
+produced `Capsule health check failed ... reason=WASM run loop exited
+unexpectedly` and a restart storm (5 attempts). The run loop must block
+forever; worth documenting in the SDK docs (the naive "signal and return"
+reading of the API is fatal).
+
+## Environment (Findings 2-3)
+
+- astrid 0.9.4 (also 0.9.1) release binaries, x86_64-unknown-linux-gnu, WSL2 Ubuntu 24.04
+- @unicity-astrid/sdk 0.1.0 + build 0.1.0 (npm latest as of 2026-07-12), Node 22
+- astrid-capsule-cli 0.2.0 (release asset `astrid-capsule-cli.capsule`)

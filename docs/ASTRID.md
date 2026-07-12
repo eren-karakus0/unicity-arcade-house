@@ -8,17 +8,17 @@ re-verified *inside the sandbox* by the capsule's own SHA-256.
 
 Source: [`capsules/arcade-player/`](../capsules/arcade-player/)
 
-## What is proven end-to-end (verified 2026-07-02, log: `capsules/arcade-player/PROOF.log`)
+## What is proven end-to-end (first proved 2026-07-02 on astrid 0.9.0; **re-proved 2026-07-12 on astrid 0.9.4**, log: `capsules/arcade-player/PROOF.log`)
 
 | Step | Status |
 |------|--------|
-| TypeScript capsule → `wasm32-wasip2` component via `@unicity-astrid/build` (ComponentizeJS) | ✅ 13 MB component, 170 host imports |
-| `astrid capsule install` on the real kernel (astrid 0.9.0, WSL Ubuntu 24.04) | ✅ installed, listed |
+| TypeScript capsule → `wasm32-wasip2` component via `@unicity-astrid/build` (ComponentizeJS) | ✅ 12.3 MB component, 142 host imports (unused `astrid:process` dropped — see below) |
+| `astrid capsule install` on the real kernel (astrid **0.9.4**, WSL Ubuntu 24.04) | ✅ installed, listed, upgraded |
 | Capability-gated egress (`net` allow-list → the arcade backend only) | ✅ HTTP works, nothing else reachable |
-| **A real session from inside the Wasmtime sandbox**: welcome stake → 3 rounds (dice **win +2 UCT**, wheel lose, plinko push) → every reveal verified `fair=true` | ✅ see PROOF.log |
-| The live arcade confirms it: leaderboard row `astrid-capsule 1W/1L/1T`, balance endpoint `{"balanceUct":5}` | ✅ independent, chain-side proof |
-| `@run` daemon loop + `runtime.signalReady()` — kernel health checks green | ✅ |
-| Bus-routed tool dispatch (`astrid capsule arcade play …`, MCP `tools/call`) | ⏳ blocked upstream (alpha) — see below |
+| **Real sessions from inside the Wasmtime sandbox** (0.9.0 and 0.9.4): welcome stake → 3 rounds per session → every reveal verified `fair=true` in-capsule | ✅ see PROOF.log [1], [4], [5] |
+| The live arcade confirms it: leaderboard row `astrid-capsule 4W/5L/3T` over 12 rounds, balance endpoint `{"balanceUct":5}` | ✅ independent, chain-side proof |
+| `@run` daemon loop + `runtime.signalReady()` — kernel health checks green on 0.9.4 | ✅ (the loop must never return — a return is treated as a crash) |
+| Bus-routed tool dispatch (`astrid capsule arcade play …`, MCP `tools/call`) | ⏳ still blocked — root cause now precise: published sdk-js 0.1.0 predates the kernel's subscribe-driven topic delivery (Rust-SDK capsules receive topics on the same kernel; ours never does). See UPSTREAM.md Finding 3 |
 
 ## The capsule
 
@@ -36,16 +36,23 @@ Source: [`capsules/arcade-player/`](../capsules/arcade-player/)
 
 ## Upstream findings (reported to the Astrid team)
 
-Getting here surfaced a real bug in the published JS SDK 0.1.0: the runtime
-bridge reads the decorator registry **before any construction**, while TC39
-method-decorator initializers only run **at first construction** — so
-install/run/tool registrations always look empty (silent no-op installs,
-"run loop exited before signaling ready" restart storms, empty tool tables).
-We patch it locally via [`patch-sdk.mjs`](../capsules/arcade-player/patch-sdk.mjs)
-(npm postinstall); the full write-up ready for an upstream issue/PR lives in
-[`patches/UPSTREAM.md`](../capsules/arcade-player/patches/UPSTREAM.md).
-The remaining gap (bus-routed tool dispatch to JS capsules) sits behind the
-same alpha surface and is documented there too.
+Getting here surfaced three real issues in the published JS toolchain, all
+documented with fixes/reproductions in
+[`patches/UPSTREAM.md`](../capsules/arcade-player/patches/UPSTREAM.md) and
+patched locally via [`patch-sdk.mjs`](../capsules/arcade-player/patch-sdk.mjs)
+(npm postinstall):
+
+1. **Decorator-registry timing bug** (sdk-js#20/#21, filed 2026-07-03): the
+   runtime bridge reads the registry before any construction, so install/run/
+   tool registrations look empty on stock 0.1.0.
+2. **Stock JS capsules cannot install on kernels ≥ 0.9.1**: the published
+   world imports `astrid:process/host@1.0.0`, which current lifecycle linkers
+   no longer register. We drop the unused import (world + bridge stub) —
+   that's what put this capsule on 0.9.4.
+3. **sdk-js 0.1.0 predates subscribe-driven topic delivery**: with the CLI
+   proxy capsule installed, the correct provider topic and `[subscribe]`
+   manifest entry, the JS interceptor hook still never fires — JS capsules
+   can't receive bus dispatch until sdk-js ships the current guest interface.
 
 ## Reproduce (WSL / Linux)
 

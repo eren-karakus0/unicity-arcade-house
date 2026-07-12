@@ -29,3 +29,58 @@
 #
 # An Astrid capsule and a Sphere agent transacted — agent vs agent, provably
 # fair, real testnet UCT.
+
+# ============================================================================
+# RE-PROOF on astrid 0.9.4 (captured 2026-07-12, UTC) — latest released kernel
+#
+# Published JS SDK 0.1.0 components stopped installing on kernels >= 0.9.1
+# ("component imports instance `astrid:process/host@1.0.0`, but a matching
+# implementation was not found in the linker"). Fixed locally by dropping the
+# unused astrid:process import from the synthesized world + SDK bridge (see
+# patch-sdk.mjs section 3 and patches/UPSTREAM.md) — component shrank from
+# 13.10 MB / 170 host imports to 12.30 MB / 142.
+#
+# [4] Fresh install on astrid 0.9.4 (WSL Ubuntu 24.04) — the capsule again
+#     played a REAL session against the live arcade from inside the sandbox:
+
+2026-07-12T17:56:42.544220Z  INFO astrid_capsule::engine::wasm: Running lifecycle hook capsule=arcade-player phase=Install previous_version="(none)"
+2026-07-12T17:56:42.547356Z  INFO astrid_capsule::engine::wasm::host::sys: arcade-player installed — sha256 self-test passed, hitting the floor plugin=arcade-player
+2026-07-12T17:56:43.792212Z  INFO astrid_capsule::engine::wasm::host::sys: [floor] house=@alphascout-knkchn jackpot=100 UCT plugin=arcade-player
+2026-07-12T17:56:45.058028Z  INFO astrid_capsule::engine::wasm::host::sys: [floor] round 1: wheel bet=1 → win +2 UCT (balance 7) fair=true plugin=arcade-player
+2026-07-12T17:56:47.479584Z  INFO astrid_capsule::engine::wasm::host::sys: [floor] round 2: rps bet=1 → lose +0 UCT (balance 6) fair=true plugin=arcade-player
+2026-07-12T17:56:49.257969Z  INFO astrid_capsule::engine::wasm::host::sys: [floor] round 3: plinko bet=1 → tie +1 UCT (balance 6) fair=true plugin=arcade-player
+2026-07-12T17:56:50.209149Z  INFO astrid_capsule::engine::wasm::host::sys: [floor] session over: 3 rounds, 1 wins, net +0 UCT, balance 6, every reveal verified fair=true plugin=arcade-player
+2026-07-12T17:56:50.209725Z  INFO astrid_capsule::engine::wasm: Lifecycle hook completed successfully capsule=arcade-player phase=Install
+
+# [5] Upgrade hook on 0.9.4 (rebuilt component) — another verified session:
+
+2026-07-12T18:06:52.603200Z  INFO astrid_capsule::engine::wasm::host::sys: arcade-player upgraded — back on the floor plugin=arcade-player
+2026-07-12T18:06:54.680563Z  INFO astrid_capsule::engine::wasm::host::sys: [floor] round 1: dice bet=1 → tie +1 UCT (balance 6) fair=true plugin=arcade-player
+2026-07-12T18:06:56.505661Z  INFO astrid_capsule::engine::wasm::host::sys: [floor] round 2: wheel bet=1 → lose +0 UCT (balance 5) fair=true plugin=arcade-player
+2026-07-12T18:06:58.473687Z  INFO astrid_capsule::engine::wasm::host::sys: [floor] round 3: coin bet=1 → win +2 UCT (balance 6) fair=true plugin=arcade-player
+2026-07-12T18:06:59.425774Z  INFO astrid_capsule::engine::wasm::host::sys: [floor] session over: 3 rounds, 1 wins, net +0 UCT, balance 6, every reveal verified fair=true plugin=arcade-player
+
+# [6] Daemon on 0.9.4 — run loop healthy (an early experiment returning from
+#     @run proved the kernel treats a returned run loop as a crash:
+#     "Capsule health check failed ... reason=WASM run loop exited unexpectedly"
+#     → restart storm; the loop must stay alive):
+
+2026-07-12T18:13:36.182031Z  INFO astrid_capsule::engine::wasm: Lifecycle hook completed successfully capsule=arcade-player phase=Upgrade
+
+# [7] Independent confirmation from the LIVE arcade backend (accumulated over
+#     the 0.9.0 + 0.9.4 sessions):
+#
+#   $ curl '.../api/arcade/balance?address=%40astrid-arcade-capsule'
+#   {"balanceUct":5}
+#
+#   $ curl '.../api/arcade/leaderboard'   (row)
+#   {"name":"astrid-capsule","wins":4,"losses":5,"ties":3,"played":12,"earnedUct":8}
+#
+# [8] Bus-routed CLI dispatch: STILL blocked on 0.9.4, now with a precise root
+#     cause — the current kernel's topic delivery is subscribe-driven (Rust-SDK
+#     capsules like astrid-capsule-cli declare [subscribe] and receive topics),
+#     but the published JS SDK 0.1.0 predates that interface: with the CLI
+#     proxy installed, the correct provider topic (cli.v1.command.run.arcade-player,
+#     astrid#891) and a [subscribe] entry declared, the JS capsule's interceptor
+#     hook never fires (entry log never appears; dispatch times out after 70s).
+#     Full write-up: patches/UPSTREAM.md.

@@ -346,6 +346,9 @@ export class ArcadePlayer {
   cliRun(payload: { req_id?: string; command?: string; args?: string[] } | undefined): {
     handled: boolean;
   } {
+    // Entry log first: proves on the kernel log that the hook actually fired
+    // and shows the exact payload shape the bridge delivered.
+    log.info(`[cli] run received: ${JSON.stringify(payload ?? null)}`);
     const reqId = String(payload?.req_id ?? "");
     const args = Array.isArray(payload?.args) ? payload.args.map(String) : [];
     let output = "";
@@ -381,12 +384,18 @@ export class ArcadePlayer {
     return { handled: true };
   }
 
-  /** Daemon loop: signal readiness so bus-routed dispatch (tools, CLI verbs) reaches us. */
+  /**
+   * Daemon loop: signal readiness so bus-routed dispatch (tools, CLI verbs)
+   * reaches us. The loop must NOT return — the kernel health-checks the run
+   * loop and treats a return as a crash ("WASM run loop exited unexpectedly"
+   * → restart storm; verified empirically on astrid 0.9.4). Short sleeps keep
+   * the guest parked in a host call rather than burning CPU.
+   */
   @run
   daemon(): void {
     runtime.signalReady();
     log.info("arcade-player ready on the floor");
-    for (;;) time.sleepMs(30_000);
+    for (;;) time.sleepMs(1_000);
   }
 
   @install

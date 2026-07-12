@@ -18,6 +18,17 @@ net = [
   "sphere-agent-bazaar-backend.onrender.com:443",
 ]
 
+# Current manifest schema (kernels >= 0.9.x, see capsule-cli's Capsule.toml):
+# topic delivery is subscribe-driven — without the [subscribe] entry below the
+# kernel never delivers the CLI verb's run topic, so the [[interceptor]] hook
+# can never fire (dispatch just times out). [publish] mirrors ipc_publish.
+[publish]
+"tool.v1.execute.*" = { wit = "opaque" }
+"cli.v1.command.result.*" = { wit = "opaque" }
+
+[subscribe]
+"cli.v1.command.run.arcade-player" = { wit = "opaque" }
+
 [[command]]
 name = "arcade"
 description = "Play Unicity Arcade House from the CLI: status | play [game] [bet] | session [rounds] [game] [bet]"

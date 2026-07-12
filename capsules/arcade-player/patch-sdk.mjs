@@ -10,6 +10,15 @@
  * read, and make duplicate records idempotent (the warm-up construction plus
  * the real one would otherwise trip the duplicate guards).
  *
+ * ALSO (kernels >= 0.9.1): drops the unused `astrid:process/host@1.0.0`
+ * import from the synthesized world + the SDK bridge. The published SDK
+ * 0.1.0 world imports process@1.0.0, but current kernels' lifecycle linker
+ * only registers process@1.1.0 — so EVERY JS capsule fails to install with
+ * "matching implementation was not found in the linker". This capsule never
+ * spawns processes (the SDK itself documents process as optional:
+ * "capsules importing astrid:process will fail to load" on some targets),
+ * so we simply stop importing it. See patches/UPSTREAM.md.
+ *
  * Runs automatically via npm postinstall. Idempotent.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -83,6 +92,46 @@ patch("bridge.js", [
     console.log("patch-sdk: patched registry.js");
   } else {
     console.log("patch-sdk: registry.js already patched");
+  }
+}
+
+// 3) Drop the unused `astrid:process` host import (kernels >= 0.9.1 removed
+//    the 1.0.0 implementation from the lifecycle linker; this capsule never
+//    spawns processes).
+//
+// 3a) sdk/dist/process.js — replace the versioned import with throwing stubs
+//     so the bundled entry no longer references the specifier at all.
+{
+  const path = join(here, "node_modules", "@unicity-astrid", "sdk", "dist", "process.js");
+  let src = readFileSync(path, "utf8");
+  const importLine =
+    'import { spawn as hostSpawn, spawnBackground as hostSpawnBackground, } from "astrid:process/host@1.0.0";';
+  const stub = `// PATCH(kernel>=0.9.1): astrid:process/host@1.0.0 is no longer linkable and
+// this capsule never uses it — stub the bridge instead of importing it.
+const hostSpawn = () => { throw new Error("astrid:process is not linked in this capsule build"); };
+const hostSpawnBackground = hostSpawn;`;
+  if (src.includes(importLine)) {
+    writeFileSync(path, src.split(importLine).join(stub));
+    console.log("patch-sdk: patched process.js (import -> stub)");
+  } else if (src.includes("astrid:process is not linked")) {
+    console.log("patch-sdk: process.js already patched");
+  } else {
+    console.error("patch-sdk: process.js import line not found — SDK layout changed, refusing to guess");
+    process.exit(1);
+  }
+}
+
+// 3b) build/src/index.mjs — drop the process import from the synthesized
+//     world (the component's import list comes from the world, not the JS).
+{
+  const path = join(here, "node_modules", "@unicity-astrid", "build", "src", "index.mjs");
+  let src = readFileSync(path, "utf8");
+  const line = "\n    import astrid:process/host@1.0.0;";
+  if (src.includes(line)) {
+    writeFileSync(path, src.split(line).join(""));
+    console.log("patch-sdk: patched build/src/index.mjs (world drops astrid:process)");
+  } else {
+    console.log("patch-sdk: build world already patched");
   }
 }
 
