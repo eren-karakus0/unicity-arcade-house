@@ -4,7 +4,9 @@ import globals from 'globals';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', 'data/**'],
+    // gen/ and target/ are ComponentizeJS build artifacts of the Astrid capsule
+    // (generated bundles, not authored code) - linting them is pure noise.
+    ignores: ['**/dist/**', '**/node_modules/**', 'data/**', '**/gen/**', '**/target/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
