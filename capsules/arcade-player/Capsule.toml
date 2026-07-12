@@ -13,9 +13,13 @@ type = "executable"
 [capabilities]
 ipc_publish = ["tool.v1.execute.*", "cli.v1.command.result.*"]
 kv = ["*"]
+# The capsule's ENTIRE network capability: the arcade it plays, plus the LLM
+# endpoint its strategist consults. Nothing else is reachable from the sandbox.
 net = [
   "sphere-agent-bazaar-backend.onrender.com",
   "sphere-agent-bazaar-backend.onrender.com:443",
+  "generativelanguage.googleapis.com",
+  "generativelanguage.googleapis.com:443",
 ]
 
 # Current manifest schema (kernels >= 0.9.x, see capsule-cli's Capsule.toml):

@@ -14,6 +14,7 @@ import {
   upgrade,
   run,
   log,
+  env,
   http,
   ipc,
   kv,
@@ -246,6 +247,104 @@ function playOne(game: GameId, bet: number): RoundReport {
 }
 
 /* ------------------------------------------------------------------ */
+/* LLM strategist — the capsule REASONS about game/bet/stop instead of */
+/* picking randomly. Capability-gated HTTP to Gemini (the manifest's   */
+/* net allow-list is exactly: the arcade + the LLM endpoint). The LLM  */
+/* only SUGGESTS; every hard limit is enforced in code below, and the  */
+/* provably-fair verification of each reveal is completely unchanged.  */
+/* The key arrives via Capsule.toml [env] (injected into the STAGED    */
+/* manifest at install time by install-wsl.sh — never committed).      */
+/* No key / any failure → the entropy picker plays instead.            */
+/* ------------------------------------------------------------------ */
+
+const MAX_BET = 3; // hard in-code cap per round, whatever the LLM says
+const LLM_MODEL = "gemini-2.0-flash";
+
+interface Decision {
+  game: GameId;
+  bet: number;
+  stop: boolean;
+  reason: string;
+  source: "llm" | "entropy";
+}
+
+interface RoundBrief {
+  game: GameId;
+  bet: number;
+  outcome: string;
+  rewardUct: number;
+}
+
+function entropyDecision(): Decision {
+  return { game: pick(GAMES), bet: 1, stop: false, reason: "entropy pick", source: "entropy" };
+}
+
+/** Ask Gemini for the next move. Returns null on any failure (caller falls back). */
+function llmDecide(state: {
+  balance: number;
+  jackpotUct: number | null;
+  roundsLeft: number;
+  history: RoundBrief[];
+}): Decision | null {
+  const key = env.get("GEMINI_API_KEY");
+  if (!key) return null;
+  const prompt = [
+    "You are the strategist for an autonomous player at a provably-fair arcade.",
+    "Games (multiplier on win, rough win odds): rps x2 ~1/3 (ties push), coin x2 1/2,",
+    "highlow x2 ~1/2, dice x2 ~15/36, wheel x2 ~5/12, plinko x2..x4 mixed, number x5 1/6.",
+    "Every round also rolls a side jackpot. You cannot influence outcomes - they are",
+    "committed before your choice. Choose the next move; stop early if the session",
+    `has gone badly. Balance: ${state.balance} UCT. Jackpot pot: ${state.jackpotUct ?? "?"} UCT.`,
+    `Rounds left in this session: ${state.roundsLeft}.`,
+    `History this session: ${state.history.length === 0 ? "(none yet)" : JSON.stringify(state.history)}.`,
+    'Reply with ONLY this JSON: {"game":"rps|wheel|plinko|dice|coin|highlow|number",',
+    `"bet":1-${MAX_BET},"stop":true|false,"reason":"<one short sentence>"}`,
+  ].join("\n");
+  try {
+    const res = http.send(
+      http.Request.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${LLM_MODEL}:generateContent`,
+      )
+        .header("x-goog-api-key", key)
+        .json({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 200, responseMimeType: "application/json" },
+        }),
+    );
+    const body = res.json<{
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    }>();
+    const text = body.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const parsed = JSON.parse(text) as { game?: unknown; bet?: unknown; stop?: unknown; reason?: unknown };
+    // Hard limits live HERE, not in the prompt: validate the game against the
+    // known menu, clamp the bet to [1, MAX_BET] and never above the balance.
+    const game = (GAMES as readonly string[]).includes(String(parsed.game)) ? (String(parsed.game) as GameId) : null;
+    if (!game) return null;
+    const bet = Math.min(Math.max(1, Math.floor(Number(parsed.bet) || 1)), MAX_BET, Math.max(1, state.balance));
+    return {
+      game,
+      bet,
+      stop: parsed.stop === true,
+      reason: String(parsed.reason ?? "").slice(0, 120) || "no reason given",
+      source: "llm",
+    };
+  } catch (e) {
+    log.warn(`[strategist] LLM unavailable (${(e as Error).message ?? e}) - falling back to entropy`);
+    return null;
+  }
+}
+
+/** Next move: the LLM's (validated, clamped) suggestion, or the entropy picker. */
+function decideNext(state: {
+  balance: number;
+  jackpotUct: number | null;
+  roundsLeft: number;
+  history: RoundBrief[];
+}): Decision {
+  return llmDecide(state) ?? entropyDecision();
+}
+
+/* ------------------------------------------------------------------ */
 /* The capsule                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -296,7 +395,11 @@ export class ArcadePlayer {
     return report;
   }
 
-  /** An autonomous session: several rounds across the hall, with a summary. */
+  /**
+   * An autonomous session: several rounds across the hall, with a summary.
+   * When the caller pins neither game nor bet, the LLM strategist decides
+   * each move (validated + clamped in code; entropy fallback without a key).
+   */
   @tool("session", { mutable: true })
   session(args: { rounds?: number; game?: string; bet?: number }): {
     rounds: RoundReport[];
@@ -307,16 +410,46 @@ export class ArcadePlayer {
     endBalance: number;
     allFair: boolean;
     jackpots: number;
+    strategist: "llm" | "entropy" | "caller";
   } {
     const n = Math.min(20, Math.max(1, Math.floor(args.rounds ?? 5)));
-    const bet = Math.max(1, Math.floor(args.bet ?? 1));
     const fixed = (GAMES as readonly string[]).includes(args.game ?? "")
       ? (args.game as GameId)
       : null;
+    const fixedBet = args.bet !== undefined ? Math.max(1, Math.floor(args.bet)) : null;
+    const callerPinned = fixed !== null || fixedBet !== null;
+    let balance = get<{ balanceUct: number }>(
+      `/api/arcade/balance?address=${encodeURIComponent(IDENTITY)}`,
+    ).balanceUct;
+    const jackpotUct = get<Leaderboard>("/api/arcade/leaderboard").houseStats?.jackpotUct ?? null;
     const rounds: RoundReport[] = [];
+    const history: RoundBrief[] = [];
+    let llmUsed = false;
     for (let i = 0; i < n; i++) {
-      const report = playOne(fixed ?? pick(GAMES), bet);
+      let game: GameId;
+      let bet: number;
+      if (callerPinned) {
+        game = fixed ?? pick(GAMES);
+        bet = fixedBet ?? 1;
+      } else {
+        const d = decideNext({
+          balance: Math.max(1, balance),
+          jackpotUct,
+          roundsLeft: n - i,
+          history,
+        });
+        if (d.source === "llm") llmUsed = true;
+        log.info(
+          `[strategist] ${d.source}: ${d.stop ? "STOP" : `play ${d.game} bet=${d.bet}`} — ${d.reason}`,
+        );
+        if (d.stop) break;
+        game = d.game;
+        bet = d.bet;
+      }
+      const report = playOne(game, bet);
       rounds.push(report);
+      history.push({ game: report.game, bet: report.bet, outcome: report.outcome, rewardUct: report.rewardUct });
+      balance = report.balance;
       this.roundsPlayed += 1;
       this.netUct += report.rewardUct - bet;
       if (report.balance < bet) break; // out of UCT — stop honestly
@@ -331,9 +464,10 @@ export class ArcadePlayer {
       losses,
       ties: rounds.length - wins - losses,
       netUct: rounds.reduce((a, r) => a + r.rewardUct - r.bet, 0),
-      endBalance: last ? last.balance : 0,
+      endBalance: last ? last.balance : balance,
       allFair: rounds.every((r) => r.fair.allOk),
       jackpots: rounds.filter((r) => r.jackpotHit).length,
+      strategist: callerPinned ? "caller" : llmUsed ? "llm" : "entropy",
     };
   }
 
@@ -422,15 +556,38 @@ export class ArcadePlayer {
  * and reports to the kernel log. (Bus-routed tool dispatch needs the JS
  * SDK's daemon mode, which is still alpha on released kernels — lifecycle
  * hooks are the proven execution path today.)
+ *
+ * Each move is decided by the LLM strategist (validated + clamped in code);
+ * without a key, the entropy picker plays exactly as before.
  */
 function walkOntoTheFloor(): void {
   try {
     const lb = get<Leaderboard>("/api/arcade/leaderboard");
-    log.info(`[floor] house=@${lb.house ?? "?"} jackpot=${lb.houseStats?.jackpotUct ?? "?"} UCT`);
+    const jackpotUct = lb.houseStats?.jackpotUct ?? null;
+    log.info(`[floor] house=@${lb.house ?? "?"} jackpot=${jackpotUct ?? "?"} UCT`);
+    let balance = get<{ balanceUct: number }>(
+      `/api/arcade/balance?address=${encodeURIComponent(IDENTITY)}`,
+    ).balanceUct;
+    const MAX_ROUNDS = 4;
     const rounds: RoundReport[] = [];
-    for (let i = 0; i < 3; i++) {
-      const r = playOne(pick(GAMES), 1);
+    const history: RoundBrief[] = [];
+    let llmUsed = false;
+    for (let i = 0; i < MAX_ROUNDS; i++) {
+      const d = decideNext({
+        balance: Math.max(1, balance),
+        jackpotUct,
+        roundsLeft: MAX_ROUNDS - i,
+        history,
+      });
+      if (d.source === "llm") llmUsed = true;
+      log.info(
+        `[strategist] ${d.source}: ${d.stop ? "STOP" : `play ${d.game} bet=${d.bet}`} — ${d.reason}`,
+      );
+      if (d.stop) break;
+      const r = playOne(d.game, d.bet);
       rounds.push(r);
+      history.push({ game: r.game, bet: r.bet, outcome: r.outcome, rewardUct: r.rewardUct });
+      balance = r.balance;
       log.info(
         `[floor] round ${i + 1}: ${r.game} bet=${r.bet} → ${r.outcome} +${r.rewardUct} UCT ` +
           `(balance ${r.balance}) fair=${r.fair.allOk}${r.jackpotHit ? " JACKPOT!" : ""}`,
@@ -444,14 +601,15 @@ function walkOntoTheFloor(): void {
       rounds: rounds.length,
       wins: rounds.filter((r) => r.outcome === "win").length,
       netUct: net,
-      endBalance: rounds[rounds.length - 1]?.balance ?? 0,
+      endBalance: rounds[rounds.length - 1]?.balance ?? balance,
       allFair,
+      strategist: llmUsed ? "llm" : "entropy",
       at: Number(time.nowMs()),
     };
     kv.set("last-session", summary);
     log.info(
       `[floor] session over: ${summary.rounds} rounds, ${summary.wins} wins, net ${net >= 0 ? "+" : ""}${net} UCT, ` +
-        `balance ${summary.endBalance}, every reveal verified fair=${allFair}`,
+        `balance ${summary.endBalance}, strategist=${summary.strategist}, every reveal verified fair=${allFair}`,
     );
   } catch (e) {
     // A hiccup on the floor must never fail the install itself.

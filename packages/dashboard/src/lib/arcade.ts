@@ -224,7 +224,7 @@ export interface AstridView {
   name?: string;
   balanceUct?: number;
   board?: LeaderRow | null;
-  runtime?: { kernel: string; sandbox: string; network: string; fairness: string };
+  runtime?: { kernel: string; sandbox: string; network: string; strategy?: string; fairness: string };
   proofUrl?: string;
   docsUrl?: string;
 }

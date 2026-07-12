@@ -246,7 +246,9 @@ const server = http.createServer((req, res) => {
       runtime: {
         kernel: 'Astrid OS 0.9.4 (WASM microkernel)',
         sandbox: 'wasm32-wasip2 component in a Wasmtime sandbox',
-        network: 'capability-gated egress: this arcade backend only',
+        network: 'capability-gated egress: this arcade + its LLM endpoint only',
+        strategy:
+          'an LLM strategist reasons about game/bet/stop each round - hard limits enforced in code, entropy fallback without a key',
         fairness: 'every provably-fair reveal re-verified in-capsule with its own SHA-256',
       },
       proofUrl:

@@ -20,6 +20,34 @@ Source: [`capsules/arcade-player/`](../capsules/arcade-player/)
 | `@run` daemon loop + `runtime.signalReady()` — kernel health checks green on 0.9.4 | ✅ (the loop must never return — a return is treated as a crash) |
 | Bus-routed tool dispatch (`astrid capsule arcade play …`, MCP `tools/call`) | ⏳ still blocked — root cause now precise: published sdk-js 0.1.0 predates the kernel's subscribe-driven topic delivery (Rust-SDK capsules receive topics on the same kernel; ours never does). See UPSTREAM.md Finding 3 |
 
+## The LLM strategist (P1.T1)
+
+The capsule doesn't just play — it **reasons**. Each round it briefs an LLM
+(Gemini, over the capsule's capability-gated HTTP) with its balance, the
+jackpot pot, the per-game odds and the session history so far, and asks for a
+strict-JSON move: `{game, bet, stop, reason}`. The kernel log shows the
+thinking: `[strategist] llm: play dice bet=2 — "<its reason>"`.
+
+Trust boundaries, by construction:
+
+- **The LLM only suggests.** The game must be on the known menu, the bet is
+  clamped in code to `[1, 3]` and never above the balance, `stop` is a bool —
+  any parse/validation failure falls back to the entropy picker.
+- **Fairness verification is untouched** — every reveal is still re-verified
+  in-capsule regardless of who chose the move.
+- **The key never enters the repo**: `install-wsl.sh` injects it into the
+  *staged* `Capsule.toml` as an `[env]` entry at install time (the kernel
+  hands `[env]` to the capsule via `astrid:sys` get-config). The manifest's
+  `net` allow-list is the arcade + `generativelanguage.googleapis.com` —
+  nothing else is reachable.
+- **No key → no drama**: the entropy picker plays exactly as before
+  (`strategist=entropy` in the session summary).
+
+Why HTTP instead of the kernel's own multi-provider LLM binding (0.9.x): that
+binding is reachable over IPC topics, which the published JS SDK cannot yet
+receive (UPSTREAM.md finding 3) — the capability-gated HTTP path is the one
+that provably works today.
+
 ## The capsule
 
 - **Tools** (declared in `Capsule.toml`, dispatched once upstream matures):

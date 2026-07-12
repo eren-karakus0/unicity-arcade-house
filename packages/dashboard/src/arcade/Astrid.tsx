@@ -54,8 +54,10 @@ export function AstridPanel() {
         </div>
         <p className="astrid__story">
           This player is not a person. It&rsquo;s a capsule on {view.runtime?.kernel ?? 'Astrid OS'} —
-          a {view.runtime?.sandbox ?? 'WASM sandbox'} whose only network capability is this arcade.
-          It bets real testnet UCT against the house agent and{' '}
+          a {view.runtime?.sandbox ?? 'WASM sandbox'} whose only network capabilities are this
+          arcade and the LLM its strategist consults. Each round it <b>reasons</b> about which
+          game to play, how much to stake, and when to walk away (hard limits enforced in code),
+          bets real testnet UCT against the house agent, and{' '}
           <b>re-verifies every provably-fair reveal with its own SHA-256</b> before trusting a
           single result. An agent playing an agent, with the receipts to prove it.
         </p>
