@@ -7,6 +7,16 @@ import {
   type StoredProof,
   type VerifyReport,
 } from './lib/fairness';
+import { NavLink } from './lib/nav';
+import {
+  CLIENT_SEED_RE,
+  fetchLeaderboard,
+  getClientSeed,
+  hasBackend,
+  makeClientSeed,
+  setClientSeed,
+  type HouseStats,
+} from './lib/arcade';
 
 const GAME_TITLES: Record<string, string> = {
   rps: 'Rock · Paper · Scissors',
@@ -16,6 +26,9 @@ const GAME_TITLES: Record<string, string> = {
   number: 'Lucky Number',
   wheel: 'Lucky Wheel',
   plinko: 'Plinko',
+  limbo: 'Limbo',
+  crash: 'Crash',
+  mines: 'Mines',
 };
 
 /**
@@ -25,9 +38,9 @@ const GAME_TITLES: Record<string, string> = {
 export function Fairness() {
   return (
     <section className="fair">
-      <a className="fair__back" href="#/">
+      <NavLink className="fair__back" href="/">
         ← back to the floor
-      </a>
+      </NavLink>
       <header className="fair__hero">
         <h1 className="fair__title">
           Don’t trust the house. <em>Check it.</em>
@@ -40,10 +53,142 @@ export function Fairness() {
       </header>
 
       <HowItWorks />
+      <SeedControl />
       <Verifier />
       <HashLab />
       <OddsTable />
+      <Solvency />
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Your client seed — the player's half of every two-seed round
+// ---------------------------------------------------------------------------
+
+function SeedControl() {
+  const [seed, setSeed] = useState(() => getClientSeed());
+  const [draft, setDraft] = useState(seed);
+  const [saved, setSaved] = useState<null | 'ok' | 'bad'>(null);
+  const valid = CLIENT_SEED_RE.test(draft.trim());
+
+  const save = () => {
+    const ok = setClientSeed(draft);
+    if (ok) setSeed(draft.trim());
+    setSaved(ok ? 'ok' : 'bad');
+  };
+  const rotate = () => {
+    const fresh = makeClientSeed();
+    setClientSeed(fresh);
+    setSeed(fresh);
+    setDraft(fresh);
+    setSaved('ok');
+  };
+
+  return (
+    <div className="fair__seed">
+      <h2 className="fair__h2">Your client seed</h2>
+      <p className="fair__note">
+        In the two-seed games (dice, wheel, plinko, limbo, crash) the outcome derives from the
+        house&rsquo;s sealed seed <strong>plus this value — yours</strong>. Set it to anything you
+        like <em>before</em> the house commits, and you can prove your entropy was in the mix. It
+        sticks in this browser until you change it.
+      </p>
+      <div className="fair__seedrow">
+        <input
+          className="fair__labinput"
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setSaved(null);
+          }}
+          maxLength={64}
+          spellCheck={false}
+          aria-label="your client seed (4-64 letters or digits)"
+        />
+        <button className="fairbtn" onClick={save} disabled={!valid || draft.trim() === seed}>
+          save
+        </button>
+        <button className="fairbtn fairbtn--ghost" onClick={rotate} title="generate a fresh random seed">
+          rotate
+        </button>
+      </div>
+      <div className="fair__seedstate">
+        {saved === 'bad' || !valid ? (
+          <span className="fair__pasteerr">4–64 letters or digits only.</span>
+        ) : (
+          <span>
+            active seed <code>{seed}</code>
+            {saved === 'ok' ? ' — saved ✓' : ''}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Provably solvent — the house's live treasury, in the open
+// ---------------------------------------------------------------------------
+
+function Solvency() {
+  const [stats, setStats] = useState<HouseStats | null>(null);
+  const [house, setHouse] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hasBackend()) return;
+    let live = true;
+    const load = () =>
+      void fetchLeaderboard()
+        .then((b) => {
+          if (!live) return;
+          if (b.houseStats) setStats(b.houseStats);
+          if (b.house) setHouse(b.house);
+        })
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 30_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, []);
+
+  if (!stats) return null;
+  return (
+    <div className="fair__solvency">
+      <h2 className="fair__h2">Provably solvent</h2>
+      <p className="fair__note">
+        Fair maths is half the story — the other half is whether the house <em>can pay</em>. These
+        are the autonomous house agent{house ? ` (@${house})` : ''}&rsquo;s live numbers, straight
+        from its wallet: what it holds, what it has paid out on-chain, and what it minted to keep
+        the floor liquid (testnet UCT — the house tops itself up, so a win is never unpayable).
+      </p>
+      <div className="fair__solvgrid">
+        <div className="fairsolv">
+          <span className="fairsolv__k">treasury</span>
+          <span className="fairsolv__v">
+            {stats.treasuryUct == null ? '…' : Math.round(stats.treasuryUct).toLocaleString()} <em>UCT</em>
+          </span>
+        </div>
+        <div className="fairsolv">
+          <span className="fairsolv__k">paid out on-chain</span>
+          <span className="fairsolv__v">
+            {Math.round(stats.paidOutUct).toLocaleString()} <em>UCT</em>
+          </span>
+        </div>
+        <div className="fairsolv">
+          <span className="fairsolv__k">rounds dealt</span>
+          <span className="fairsolv__v">{stats.roundsPlayed.toLocaleString()}</span>
+        </div>
+        <div className="fairsolv">
+          <span className="fairsolv__k">live jackpot</span>
+          <span className="fairsolv__v">
+            {stats.jackpotUct == null ? '…' : stats.jackpotUct.toLocaleString()} <em>UCT</em>
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -124,8 +269,8 @@ function Verifier() {
 
       {proofs.length === 0 ? (
         <div className="fair__empty">
-          No rounds archived here yet — <a href="#/">play one on the floor</a> and come back, or
-          paste a proof below.
+          No rounds archived here yet — <NavLink href="/">play one on the floor</NavLink> and come
+          back, or paste a proof below.
         </div>
       ) : (
         <ul className="fair__rounds">
@@ -318,6 +463,22 @@ function OddsTable() {
                 12 peg bits <code>h[i] &amp; 1</code>; the bucket is the count of rights: {plinko}
               </td>
               <td>×0–×10 · ×1 pushes</td>
+            </tr>
+            <tr>
+              <td>Limbo · Crash</td>
+              <td>
+                <code>r = (h[0..8]+1)/2³²</code> → result <code>max(1, 0.96/r)</code> — win iff it
+                reaches your target; <code>P(≥t) = 0.96/t</code>, a flat 96% return at every target
+              </td>
+              <td>× your target (up to ×1000)</td>
+            </tr>
+            <tr>
+              <td>Mines</td>
+              <td>
+                5 mines from a Fisher–Yates shuffle seeded by <code>sha256(secret:mines)</code> —
+                sealed before you pick; brackets are fair odds × 0.96
+              </td>
+              <td>×1.2 (1 cell) – ×8.39 (8 cells)</td>
             </tr>
             <tr>
               <td>Progressive jackpot</td>

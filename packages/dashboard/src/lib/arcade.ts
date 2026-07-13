@@ -439,3 +439,38 @@ export function makeClientSeed(): string {
   crypto.getRandomValues(bytes);
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+// ---------------------------------------------------------------------------
+// The player's client seed — YOUR half of every two-seed round. Persistent
+// and editable (pro-casino baseline): set your own string and every dice /
+// wheel / plinko / limbo / crash round derives from the house's sealed seed
+// PLUS this value, so you can prove your entropy was in the mix.
+// ---------------------------------------------------------------------------
+
+const CLIENT_SEED_KEY = 'arcade:clientSeed';
+export const CLIENT_SEED_RE = /^[0-9a-zA-Z]{4,64}$/;
+
+/** The active client seed: the player's saved one, or a fresh generated one (persisted). */
+export function getClientSeed(): string {
+  try {
+    const saved = localStorage.getItem(CLIENT_SEED_KEY);
+    if (saved && CLIENT_SEED_RE.test(saved)) return saved;
+    const fresh = makeClientSeed();
+    localStorage.setItem(CLIENT_SEED_KEY, fresh);
+    return fresh;
+  } catch {
+    return makeClientSeed(); // storage blocked — still fair, just not sticky
+  }
+}
+
+/** Save a player-chosen seed. Returns false (and keeps the old one) if invalid. */
+export function setClientSeed(seed: string): boolean {
+  const s = seed.trim();
+  if (!CLIENT_SEED_RE.test(s)) return false;
+  try {
+    localStorage.setItem(CLIENT_SEED_KEY, s);
+  } catch {
+    /* storage blocked */
+  }
+  return true;
+}

@@ -212,6 +212,55 @@ export async function verifyProof(p: StoredProof): Promise<VerifyReport> {
       detail: `each hex digit & 1 is one peg (0=left, 1=right); the bucket is the count of rights`,
       ok: okPath && bucket === Number(r.bucketIndex),
     });
+  } else if (p.game === 'limbo' || p.game === 'crash') {
+    const client = String(r.clientSeed ?? '');
+    const claimedX100 = Number(p.game === 'crash' ? r.crashX100 : r.resultX100);
+    const targetX100 = Number(r.targetX100);
+    const h = await sha256Hex(`${p.secret}:${client}`);
+    const raw = hexInt(h, 0, 8);
+    const rr = (raw + 1) / 0x100000000;
+    const x100 = Math.max(100, Math.min(1_000_000, Math.floor((0.96 / rr) * 100)));
+    steps.push({
+      title: p.game === 'crash' ? 'the crash point' : 'the sealed multiplier',
+      formula: `sha256(serverSeed + ":" + clientSeed) = ${short(h, 20)}`,
+      computed: `×${(x100 / 100).toFixed(2)}`,
+      expected: `×${(claimedX100 / 100).toFixed(2)} (your target ×${(targetX100 / 100).toFixed(2)})`,
+      detail:
+        `hex[0..8]=${h.slice(0, 8)} → r=(${raw}+1)/2³² → max(1, 0.96/r) = ×${(x100 / 100).toFixed(2)}. ` +
+        `You ${claimedX100 >= targetX100 ? 'cleared' : 'missed'} the target — the 0.96 keeps every target at a flat 96% return`,
+      ok: x100 === claimedX100,
+    });
+  } else if (p.game === 'mines') {
+    const claimed = Array.isArray(r.mines) ? (r.mines as number[]) : [];
+    const cells = 25;
+    const idx = Array.from({ length: cells }, (_, i) => i);
+    let block = await sha256Hex(`${p.secret}:mines`);
+    let offset = 0;
+    const draw = async (): Promise<number> => {
+      if (offset + 8 > block.length) {
+        block = await sha256Hex(block);
+        offset = 0;
+      }
+      const v = parseInt(block.slice(offset, offset + 8), 16);
+      offset += 8;
+      return v;
+    };
+    for (let i = cells - 1; i > 0; i--) {
+      const j = (await draw()) % (i + 1);
+      [idx[i], idx[j]] = [idx[j]!, idx[i]!];
+    }
+    const mines = idx.slice(0, claimed.length || 5).sort((a, b) => a - b);
+    const ok = mines.length === claimed.length && mines.every((m, i) => m === claimed[i]);
+    steps.push({
+      title: 'the mine layout',
+      formula: `Fisher–Yates over 25 cells, seeded by sha256(secret + ":mines")`,
+      computed: `mines at [${mines.join(', ')}]`,
+      expected: `mines at [${claimed.join(', ')}]`,
+      detail:
+        'the shuffle draws 32 bits per step from a sha256 chain of the secret — the whole board ' +
+        'was fixed by the commitment before you picked a single cell',
+      ok,
+    });
   } else {
     steps.push({
       title: 'the reveal',

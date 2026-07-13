@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWalletCtx } from './WalletContext';
+import { NavLink } from './lib/nav';
 import {
   cashOut,
   fetchLeaderboard,
   fetchSettlement,
   hasBackend,
-  makeClientSeed,
+  getClientSeed,
   newRound,
   playRound,
   verifyCommit,
@@ -399,10 +400,11 @@ export function Arcade() {
     setError(null);
     sfx.click();
     // Target-plus-seed games (Limbo/Crash): the option carries the target and
-    // the client entropy is minted fresh at the moment of play.
+    // the player's persistent client seed (editable on the fairness page)
+    // supplies their half of the entropy.
     const finalChoice =
       withSeed && choice && typeof choice === 'object'
-        ? { ...(choice as Record<string, unknown>), seed: makeClientSeed() }
+        ? { ...(choice as Record<string, unknown>), seed: getClientSeed() }
         : choice;
     try {
       const res = await playRound({
@@ -764,7 +766,7 @@ export function Arcade() {
               <div className="gbtns">
                 <button
                   className="again"
-                  onClick={() => void play(makeClientSeed())}
+                  onClick={() => void play(getClientSeed())}
                   disabled={!round || status === 'playing' || hold || (you?.chips ?? 0) < bet}
                 >
                   {ui.rollLabel ?? 'Play'}
@@ -835,9 +837,9 @@ export function Arcade() {
               ) : verified ? (
                 <span className="verify verify--ok">
                   🔐 provably fair — the reveal matches the sealed commitment{' '}
-                  <a className="verify__link" href="#/fairness" title="re-run the math yourself, step by step">
+                  <NavLink className="verify__link" href="/fairness" title="re-run the math yourself, step by step">
                     see the math →
-                  </a>
+                  </NavLink>
                 </span>
               ) : (
                 <span className="verify verify--bad">⚠ commitment did not verify</span>
