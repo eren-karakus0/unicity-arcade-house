@@ -3,6 +3,7 @@ import { useWalletCtx } from './WalletContext';
 import { ConnectWallet } from './ConnectWallet';
 import { fetchProfile, hasBackend, type PlayerProfile } from './lib/arcade';
 import { AchievementsPanel } from './arcade/Achievements';
+import { NavLink } from './lib/nav';
 import { InvitePanel } from './arcade/Invite';
 
 interface IdLike {
@@ -38,9 +39,9 @@ export function Profile() {
 
   return (
     <section className="profile">
-      <a className="fair__back" href="#/">
+      <NavLink className="fair__back" href="/">
         ← back to the floor
-      </a>
+      </NavLink>
 
       {!connected ? (
         <div className="profile__gate">

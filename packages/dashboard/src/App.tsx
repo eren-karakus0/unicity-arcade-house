@@ -4,19 +4,36 @@ import { ConnectWallet } from './ConnectWallet';
 import { Fairness } from './Fairness';
 import { Profile } from './Profile';
 import { captureRef } from './lib/arcade';
+import { NavLink } from './lib/nav';
 import { Card, Coin, Die, HandScissors, PlinkoMark } from './arcade/art';
 import { isMuted, setMuted, sfx } from './arcade/sound';
 
-/** Tiny hash router — `#/fairness` is the only other room in the house. */
+/**
+ * Tiny path router — clean URLs (`/fairness`, `/profile`), no `#`. The SPA
+ * rewrite in vercel.json serves index.html for deep links. Legacy `#/x` links
+ * (old shares/bookmarks) are upgraded to `/x` on load.
+ */
+function normalizePath(): string {
+  const p = window.location.pathname.replace(/\/+$/, '') || '/';
+  return p;
+}
+
 function useRoute(): string {
-  const [route, setRoute] = useState(() => window.location.hash);
+  const [route, setRoute] = useState(normalizePath);
   useEffect(() => {
-    const onHash = () => {
-      setRoute(window.location.hash);
+    // Upgrade a legacy hash deep-link once, keeping query params (?ref=…).
+    const h = window.location.hash;
+    if (h.startsWith('#/')) {
+      const target = h.slice(1).replace(/\/+$/, '') || '/';
+      history.replaceState({}, '', target + window.location.search);
+      setRoute(target === '' ? '/' : target);
+    }
+    const onNav = () => {
+      setRoute(normalizePath());
       window.scrollTo(0, 0);
     };
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    window.addEventListener('popstate', onNav);
+    return () => window.removeEventListener('popstate', onNav);
   }, []);
   return route;
 }
@@ -28,7 +45,7 @@ export function App() {
     <div className="app">
       <WallArt />
       <Header />
-      {route === '#/fairness' ? <Fairness /> : route === '#/profile' ? <Profile /> : <Arcade />}
+      {route === '/fairness' ? <Fairness /> : route === '/profile' ? <Profile /> : <Arcade />}
       <Footer />
     </div>
   );
@@ -73,12 +90,12 @@ function Header() {
         <div className="hdr__sub">Provably-fair games · on-chain payouts</div>
       </div>
       <div className="hdr__right">
-        <a className="hdr__fair" href="#/profile" title="your stats, badges, and invite link">
+        <NavLink className="hdr__fair" href="/profile" title="your stats, badges, and invite link">
           profile
-        </a>
-        <a className="hdr__fair" href="#/fairness" title="verify any round yourself">
+        </NavLink>
+        <NavLink className="hdr__fair" href="/fairness" title="verify any round yourself">
           fairness
-        </a>
+        </NavLink>
         <MuteButton />
         <span className="hdr__net">testnet2</span>
         <ConnectWallet />
@@ -117,9 +134,9 @@ function Footer() {
     <footer className="footer">
       <span className="footer__brand">Unicity Arcade House</span>
       <span>
-        <a className="footer__fair" href="#/fairness">
+        <NavLink className="footer__fair" href="/fairness">
           Provably-fair games
-        </a>
+        </NavLink>
         , on-chain payouts
       </span>
       <span>Built on the Sphere SDK · testnet2</span>
