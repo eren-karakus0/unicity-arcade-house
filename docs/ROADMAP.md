@@ -73,10 +73,17 @@ verification, VIP/races, live feeds).
   the arcade). *Deliberately deferred*: async PvP duels and on-chain
   achievement badges — real features, but blackjack (P2.T5) is the higher-
   value next build; both stay on the future list rather than shipping thin.
-- [ ] **P2.T5 — Table games**: a multi-step round engine (same commit-reveal
-  guarantees) · **Blackjack vs the house** first · poker vs bots as stretch.
-  *Live multiplayer tables are explicitly conditional on an always-on host —
-  not promised on the current free tier.*
+- [x] **P2.T5 — Table games** *(shipped 2026-07-13)*: the multi-step table
+  engine landed — staked hands, TTL-refunded when abandoned, persisted across
+  restarts, settling through the same single pipeline as every one-shot game —
+  and **Blackjack vs the house** is live on it (S17, naturals 3:2, double;
+  the whole shoe committed before the first card and verified card-by-card in
+  the browser). *Still deferred by design*: poker vs bots (stretch), and live
+  multiplayer tables remain conditional on an always-on host.
+
+**Both tracks complete.** Future list: poker vs bots · async PvP duels ·
+on-chain badges · live multiplayer tables (always-on host) · real-Arcade
+`ARCADE_SERVICE_URL` routing.
 
 ## Working protocol
 
