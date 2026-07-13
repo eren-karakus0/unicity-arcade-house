@@ -59,9 +59,13 @@ verification, VIP/races, live feeds).
   panel (treasury, on-chain payouts, rounds, jackpot) beside the odds table.
   Bonus: clean URLs — `/fairness`, `/profile` (no `#`), SPA rewrite + legacy
   hash-link upgrade.
-- [ ] **P2.T3 — Retention**: XP/levels with log-scaled progress · tiered
-  rakeback · prize-ladder races (60/25/15) on the durable payout rail ·
-  auto-bet.
+- [x] **P2.T3 — Retention** *(shipped 2026-07-13)*: XP on every round
+  (log-scaled — uncapped bets can't buy the ladder) across five tiers
+  Bronze→Diamond · tiered rakeback (2–10% of lost bets back, milli-chip
+  accrual) with one-time level-up bonuses · podium races — the tournament
+  pool now splits 60/25/15 across the top three on the durable payout rail ·
+  auto-bet (×5/×10/×25, cooldown-paced, self-stopping) · tier card + XP bar
+  on the profile. Smoke-verified live (xpGained math exact on a real round).
 - [ ] **P2.T4 — Unicity moat**: one unified Autonomous Players showcase
   (Astrid bots + the Bazaar patron) · stretch: async PvP duels, on-chain
   badges.
