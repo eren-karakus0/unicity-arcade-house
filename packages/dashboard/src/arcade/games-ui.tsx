@@ -17,6 +17,7 @@ import {
 import { CyclingTile, PlinkoFx, TumblingDie, WheelFx } from './fx';
 
 export const GAMES_META: GameMeta[] = [
+  { id: 'blackjack', title: 'Blackjack', blurb: 'Hit, stand, double — against a shoe sealed before the first card.', rewardMult: 2, inputKind: 'choice' },
   { id: 'crash', title: 'Crash', blurb: 'Set your cash-out, ride the curve, beat the sealed bust point.', rewardMult: 2, inputKind: 'choice' },
   { id: 'limbo', title: 'Limbo', blurb: 'Name your multiplier — the sealed result must reach it.', rewardMult: 2, inputKind: 'choice' },
   { id: 'mines', title: 'Mines', blurb: '5 mines sealed on a 5×5 board — clear your picks for up to ×8.39.', rewardMult: 8, inputKind: 'choice' },
@@ -213,7 +214,23 @@ const TARGET_OPTIONS = (targets: number[]): Option[] =>
     withSeed: true,
   }));
 
+const SpadeMark = ({ size = 24 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path
+      d="M12 3c3.2 3.1 7 5.6 7 9a3.6 3.6 0 0 1-6.2 2.5c.2 1.9.8 3.3 2.2 4.5h-6c1.4-1.2 2-2.6 2.2-4.5A3.6 3.6 0 0 1 5 12c0-3.4 3.8-5.9 7-9Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 export const GAME_UI: Record<string, GameUI> = {
+  blackjack: {
+    Icon: ({ size }) => <SpadeMark size={size} />,
+    // The table renders its own multi-step surface (see BlackjackTable);
+    // this Stage never mounts — the picker only needs the icon + meta.
+    Stage: () => <span />,
+    reward: () => 'blackjack pays 3:2',
+  },
   crash: {
     Icon: ({ size }) => <RocketMark size={size} />,
     Stage: ({ round, result, pending }) => {

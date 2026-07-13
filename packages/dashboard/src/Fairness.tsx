@@ -29,6 +29,7 @@ const GAME_TITLES: Record<string, string> = {
   limbo: 'Limbo',
   crash: 'Crash',
   mines: 'Mines',
+  blackjack: 'Blackjack',
 };
 
 /**
@@ -479,6 +480,15 @@ function OddsTable() {
                 sealed before you pick; brackets are fair odds × 0.96
               </td>
               <td>×1.2 (1 cell) – ×8.39 (8 cells)</td>
+            </tr>
+            <tr>
+              <td>Blackjack</td>
+              <td>
+                the whole 52-card shoe is a Fisher–Yates shuffle seeded by{' '}
+                <code>sha256(secret:deck)</code> — sealed before the first card; dealer stands on
+                all 17s
+              </td>
+              <td>×2 · natural ×2.5 (3:2) · push returns</td>
             </tr>
             <tr>
               <td>Progressive jackpot</td>

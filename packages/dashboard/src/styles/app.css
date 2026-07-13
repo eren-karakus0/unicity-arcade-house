@@ -2634,3 +2634,24 @@
 }
 .tiercard__hint { color: var(--text-muted); }
 .betbar--auto { margin-top: 4px; }
+
+/* ===== P2.T5: blackjack table ===== */
+.bj { display: flex; flex-direction: column; gap: 14px; }
+.bj__table { display: flex; flex-direction: column; gap: 12px; padding: 6px 0; }
+.bj__hand { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.bj__handlabel {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  min-width: 52px;
+}
+.bj__cards { display: flex; gap: 8px; flex-wrap: wrap; }
+.bj__card { display: inline-flex; }
+.bj__total {
+  font-family: var(--font-mono, monospace);
+  font-size: 15px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}

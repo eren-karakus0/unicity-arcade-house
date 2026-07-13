@@ -261,6 +261,42 @@ export async function verifyProof(p: StoredProof): Promise<VerifyReport> {
         'was fixed by the commitment before you picked a single cell',
       ok,
     });
+  } else if (p.game === 'blackjack') {
+    const player = Array.isArray(r.player) ? (r.player as number[]) : [];
+    const dealer = Array.isArray(r.dealer) ? (r.dealer as number[]) : [];
+    // Re-shuffle the shoe from the secret (seeded Fisher–Yates on a sha256
+    // chain) and check every revealed card in exact consumption order.
+    const idx = Array.from({ length: 52 }, (_, i) => i);
+    let block = await sha256Hex(`${p.secret}:deck`);
+    let offset = 0;
+    const draw = async (): Promise<number> => {
+      if (offset + 8 > block.length) {
+        block = await sha256Hex(block);
+        offset = 0;
+      }
+      const v = parseInt(block.slice(offset, offset + 8), 16);
+      offset += 8;
+      return v;
+    };
+    for (let i = 51; i > 0; i--) {
+      const j = (await draw()) % (i + 1);
+      [idx[i], idx[j]] = [idx[j]!, idx[i]!];
+    }
+    const consumed =
+      player.length >= 2 && dealer.length >= 2
+        ? [player[0]!, dealer[0]!, player[1]!, dealer[1]!, ...player.slice(2), ...dealer.slice(2)]
+        : [];
+    const ok = consumed.length > 0 && consumed.every((card, i) => card === idx[i]);
+    steps.push({
+      title: 'the whole shoe',
+      formula: 'Fisher–Yates over 52 cards, seeded by sha256(secret + ":deck")',
+      computed: `first ${consumed.length} cards: [${idx.slice(0, consumed.length).join(', ')}]`,
+      expected: `your hand + dealer, in draw order: [${consumed.join(', ')}]`,
+      detail:
+        'cards leave the shoe as you-dealer-you-dealer, then your hits, then the dealer draws to 17 — ' +
+        'all fixed by the commitment before the first card showed',
+      ok,
+    });
   } else {
     steps.push({
       title: 'the reveal',

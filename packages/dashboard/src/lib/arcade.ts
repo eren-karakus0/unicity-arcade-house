@@ -177,6 +177,81 @@ export function playRound(input: {
   });
 }
 
+// ---- multi-step tables (blackjack) ----
+
+export interface BjHandView {
+  player: number[];
+  playerTotal: number;
+  playerSoft: boolean;
+  dealerUp: number;
+  dealer?: number[];
+  dealerTotal?: number;
+  doubled: boolean;
+  done: boolean;
+  canDouble: boolean;
+}
+
+export interface TableView {
+  game: string;
+  roundId: string;
+  commit: string;
+  bet: number;
+  jackpotUct: number;
+  hand: BjHandView;
+  you?: PlayerSnapshot;
+  /** Present once the hand is over — the standard settled result. */
+  result?: PlayResult;
+}
+
+export function newTable(game: string, bet: number, address?: string, name?: string): Promise<TableView> {
+  return post<TableView>('/api/arcade/table/new', { game, bet, address, name });
+}
+
+export function stepTable(roundId: string, action: 'hit' | 'stand' | 'double', address?: string): Promise<TableView> {
+  return post<TableView>('/api/arcade/table/step', { roundId, action, address });
+}
+
+/** Browser twin of the server's deriveDeck — the whole shoe from the secret. */
+export async function deriveDeckBrowser(secret: string): Promise<number[]> {
+  const sha = async (s: string): Promise<string> => {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  };
+  const idx = Array.from({ length: 52 }, (_, i) => i);
+  let block = await sha(`${secret}:deck`);
+  let offset = 0;
+  const draw = async (): Promise<number> => {
+    if (offset + 8 > block.length) {
+      block = await sha(block);
+      offset = 0;
+    }
+    const v = parseInt(block.slice(offset, offset + 8), 16);
+    offset += 8;
+    return v;
+  };
+  for (let i = 51; i > 0; i--) {
+    const j = (await draw()) % (i + 1);
+    [idx[i], idx[j]] = [idx[j]!, idx[i]!];
+  }
+  return idx;
+}
+
+/**
+ * Verify a finished blackjack hand: every revealed card must be the shoe's
+ * cards in exact consumption order (P,D,P,D, then player draws, then dealer).
+ */
+export async function verifyBlackjack(
+  secret: string,
+  reveal: { player: number[]; dealer: number[] },
+): Promise<boolean> {
+  const deck = await deriveDeckBrowser(secret);
+  const p = reveal.player;
+  const d = reveal.dealer;
+  if (p.length < 2 || d.length < 2) return false;
+  const consumed = [p[0]!, d[0]!, p[1]!, d[1]!, ...p.slice(2), ...d.slice(2)];
+  return consumed.every((card, i) => card === deck[i]);
+}
+
 /** Withdraw the wallet's in-house balance 1:1 as UCT, settled on-chain by the house. */
 export function cashOut(address: string, name?: string): Promise<{ settlementId: string; amountUct: number }> {
   return post<{ settlementId: string; amountUct: number }>('/api/arcade/cashout', { address, name });

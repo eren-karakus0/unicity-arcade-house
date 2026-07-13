@@ -35,6 +35,7 @@ import {
 import { saveProof } from './lib/fairness';
 import { AchievementToast } from './arcade/Achievements';
 import { AstridPanel } from './arcade/Astrid';
+import { BlackjackTable } from './arcade/BlackjackTable';
 import { TournamentPanel } from './arcade/Tournament';
 import { GAME_UI, GAMES_META } from './arcade/games-ui';
 import { BotMark, Flame, LockMark, WheelFace } from './arcade/art';
@@ -572,6 +573,35 @@ export function Arcade() {
     setVerified(null);
   };
 
+  /** Shared side-effects for a settled result from ANY surface (tables too):
+   *  proof archive, toasts, tournament + board refresh, balance sync. */
+  const absorbResult = (res: PlayResult) => {
+    saveProof(res);
+    if (res.achievements?.length) {
+      setAchQueue((q) => [...q, ...res.achievements!]);
+      sfx.win();
+    }
+    if (res.levelUp) {
+      setAchQueue((q) => [
+        ...q,
+        {
+          id: `tier-${res.levelUp!.tier}`,
+          title: `${res.levelUp!.tier.toUpperCase()} TIER`,
+          detail: `+${res.levelUp!.bonus} UCT level-up bonus · rakeback now ${res.progress?.rakebackPct ?? '?'}%`,
+          icon: 'crown',
+          reward: res.levelUp!.bonus,
+          unlocked: true,
+        },
+      ]);
+      sfx.win();
+    }
+    if (res.outcome === 'win') refreshTournament();
+    if (res.daily) {
+      setYou({ streak: res.streak, best: res.best, daily: res.daily, chips: res.chips, chipsGranted: 0 });
+    }
+    refreshBoard();
+  };
+
   if (!hasBackend()) {
     return (
       <section className="arcade">
@@ -733,6 +763,21 @@ export function Arcade() {
           <span className="table__blurb">{meta.blurb}</span>
         </div>
 
+        {selected === 'blackjack' ? (
+          ready === true ? (
+            <BlackjackTable
+              address={wallet.identity ? addressOf(wallet.identity) : undefined}
+              name={wallet.identity ? nameOf(wallet.identity) : undefined}
+              chips={you?.chips ?? 0}
+              onSettled={absorbResult}
+            />
+          ) : (
+            <div className="commit commit--wait">
+              <span className="dot" /> the dealer is waking up — usually under a minute
+            </div>
+          )
+        ) : (
+          <>
         <ui.Stage
           round={round}
           result={suspense ? null : result}
@@ -932,6 +977,8 @@ export function Arcade() {
         )}
 
         {error && <div className="tryit__error">⚠ {error}</div>}
+          </>
+        )}
       </div>
 
       <TournamentPanel view={tourney} />
