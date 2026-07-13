@@ -1,7 +1,8 @@
 import type { SphereAgent } from '../sphere-agent.js';
 import { createLogger, type Logger } from '../logger.js';
 import { commitHash, deriveJackpotRoll, makeNonce } from './rng.js';
-import { GAMES, type Outcome } from './games/index.js';
+import { GAMES, type Judged, type Outcome } from './games/index.js';
+import { bjJudge, bjStart, bjStep, bjView, type BjAction, type BjHand } from './games/blackjack.js';
 import {
   applyLoss,
   applyProgress,
@@ -61,6 +62,41 @@ interface Round {
   commit: string;
   publicState?: Record<string, unknown>;
   createdAt: number;
+}
+
+/**
+ * A MULTI-STEP table round (blackjack): the bet is staked at the deal and the
+ * hand advances via /step until done, when it settles through the exact same
+ * pipeline as every one-shot game. Persisted (small + bounded by TTL) so a
+ * restart can't eat a staked hand; expiry refunds the stake.
+ */
+export interface TableRound {
+  gameId: 'blackjack';
+  secret: string;
+  nonce: string;
+  commit: string;
+  createdAt: number;
+  key: string;
+  playerAddress?: string;
+  name?: string;
+  /** Total staked so far (doubles bump it). */
+  bet: number;
+  /** Player actions taken, in order (feeds the jackpot input). */
+  actions: BjAction[];
+  hand: BjHand;
+}
+
+/** What the table returns mid-hand (or alongside the final PlayResult). */
+export interface TableView {
+  game: string;
+  roundId: string;
+  commit: string;
+  bet: number;
+  jackpotUct: number;
+  hand: ReturnType<typeof bjView>;
+  you?: PlayerSnapshot;
+  /** Present once the hand is over — the standard settled result. */
+  result?: PlayResult;
 }
 
 export interface PlayerSnapshot {
@@ -258,6 +294,8 @@ export interface DealerSnapshot {
   tournament: TournamentSnapshot;
   /** Tournament prizes owed but not yet confirmed on-chain (retried on boot). */
   pendingPrizes: PendingPrize[];
+  /** Open multi-step table hands (staked - must survive a restart). */
+  tables?: [string, TableRound][];
 }
 
 interface TxLike {
@@ -288,6 +326,8 @@ export class GameDealer {
   private readonly log: Logger;
 
   private readonly rounds = new Map<string, Round>();
+  /** Open multi-step table hands (blackjack), keyed by roundId. */
+  private readonly tables = new Map<string, TableRound>();
   private readonly lastPlay = new Map<string, number>();
   private readonly board = new Map<string, LeaderRow>();
   private readonly players = new Map<string, PlayerState>();
@@ -412,15 +452,51 @@ export class GameDealer {
     const bet = Math.floor(Number(input.bet ?? 1));
     if (!Number.isSafeInteger(bet) || bet < 1) throw new Error('Bet must be a whole number of UCT (1+).');
     const key = this.keyFor(input.playerAddress);
-    let state = welcomeGrant(this.players.get(key) ?? newPlayerState()).state;
+    const state = welcomeGrant(this.players.get(key) ?? newPlayerState()).state;
     if (state.chips < bet) {
       throw new Error(`Not enough UCT — you have ${state.chips}. Deposit from your wallet to keep playing.`);
     }
     this.rounds.delete(input.roundId); // one-shot: a commitment is spent once
 
     const judged = game.judge(round.secret, resolved, round.publicState);
-    const name = (input.name || input.playerAddress || 'anon').replace(/^@/, '').slice(0, 24);
-    if (input.playerAddress) this.lastPlay.set(input.playerAddress, Date.now());
+    return this.settleJudged({
+      roundId: input.roundId,
+      gameId: round.gameId,
+      secret: round.secret,
+      nonce: round.nonce,
+      commit: round.commit,
+      judged,
+      bet,
+      jackpotInput: String(resolved),
+      playerAddress: input.playerAddress,
+      name: input.name,
+      ref: input.ref,
+    });
+  }
+
+  /**
+   * The single settle path every round ends in — one-shot plays and finished
+   * table hands alike: stake the bet, apply the outcome + engagement bonuses,
+   * roll the jackpot, feed achievements/tournament/XP, and shape the result.
+   */
+  private settleJudged(args: {
+    roundId: string;
+    gameId: string;
+    secret: string;
+    nonce: string;
+    commit: string;
+    judged: Judged;
+    bet: number;
+    jackpotInput: string;
+    playerAddress?: string | undefined;
+    name?: string | undefined;
+    ref?: unknown;
+  }): PlayResult {
+    const { judged, bet } = args;
+    const key = this.keyFor(args.playerAddress);
+    let state = welcomeGrant(this.players.get(key) ?? newPlayerState()).state;
+    const name = (args.name || args.playerAddress || 'anon').replace(/^@/, '').slice(0, 24);
+    if (args.playerAddress) this.lastPlay.set(args.playerAddress, Date.now());
 
     // Settle the bet by outcome (total-return multipliers) + engagement bonuses.
     state = { ...state, chips: state.chips - bet };
@@ -446,15 +522,15 @@ export class GameDealer {
     // Notable chip wins join the public house feed (the live ticker) —
     // bounded, threshold keeps the strip interesting without spamming it.
     if (judged.outcome === 'win' && reward >= 10) {
-      this.pushEvent({ kind: 'win', at: Date.now(), amountUct: reward, name, game: round.gameId });
+      this.pushEvent({ kind: 'win', at: Date.now(), amountUct: reward, name, game: args.gameId });
     }
     this.roundsPlayed += 1;
 
     // Progressive jackpot — every round rolls for the whole pot, win or lose.
     // The roll derives from the committed secret + the player's input, so it is
     // fixed before the reveal and verifiable in the browser.
-    const jackpotInput = String(resolved);
-    const jRoll = deriveJackpotRoll(round.secret, jackpotInput, this.jackpotOdds);
+    const jackpotInput = args.jackpotInput;
+    const jRoll = deriveJackpotRoll(args.secret, jackpotInput, this.jackpotOdds);
     let jackpot: JackpotResult = {
       roll: jRoll,
       threshold: this.jackpotOdds,
@@ -462,15 +538,15 @@ export class GameDealer {
       potUct: this.pot,
       input: jackpotInput,
     };
-    if (jackpot.hit && input.playerAddress) {
+    if (jackpot.hit && args.playerAddress) {
       this.log.info(`JACKPOT — @${name} hit the ${jackpot.potUct} UCT pot`);
       this.enqueueSettlement(
-        `${input.roundId}:jackpot`,
-        input.playerAddress,
+        `${args.roundId}:jackpot`,
+        args.playerAddress,
         jackpot.potUct,
         'arcade-jackpot',
         name,
-        round.gameId,
+        args.gameId,
       );
       this.pot = this.jackpotSeed; // optimistic — restored if the payout fails
     } else if (jackpot.hit) {
@@ -483,7 +559,7 @@ export class GameDealer {
     state = {
       ...state,
       plays: state.plays + 1,
-      games: state.games.includes(round.gameId) ? state.games : [...state.games, round.gameId],
+      games: state.games.includes(args.gameId) ? state.games : [...state.games, args.gameId],
       wins: judged.outcome === 'win' ? state.wins + 1 : state.wins,
       totalWon: judged.outcome === 'win' ? state.totalWon + reward : state.totalWon,
       biggestWin: judged.outcome === 'win' && reward > state.biggestWin ? reward : state.biggestWin,
@@ -501,13 +577,13 @@ export class GameDealer {
     // Tournament: net winnings (payout minus stake) race the current window.
     this.settleTournament(Date.now());
     if (judged.outcome === 'win') {
-      this.tourney.record(key, name, input.playerAddress, reward - bet);
+      this.tourney.record(key, name, args.playerAddress, reward - bet);
     }
 
     // Referral: on this player's first play, credit both sides once. Guarded by
     // referredBy so it never repeats; no self-referral; referrer must exist.
     let referral: PlayResult['referral'];
-    const refCode = normalizeCode(input.ref);
+    const refCode = normalizeCode(args.ref);
     if (refCode && state.referredBy === undefined) {
       const referrerKey = this.referralCodes.get(refCode);
       if (referrerKey && referrerKey !== key && this.players.has(referrerKey)) {
@@ -534,15 +610,15 @@ export class GameDealer {
     }));
 
     return {
-      game: round.gameId,
-      roundId: input.roundId,
+      game: args.gameId,
+      roundId: args.roundId,
       outcome: judged.outcome,
       rewardUct: reward,
       bet,
       chips: state.chips,
-      commit: round.commit,
-      secret: round.secret,
-      nonce: round.nonce,
+      commit: args.commit,
+      secret: args.secret,
+      nonce: args.nonce,
       reveal: judged.reveal,
       streak: state.streak,
       best: state.best,
@@ -557,6 +633,136 @@ export class GameDealer {
       progress: progressView(state),
       rakeCredited: prog.rakeCredited,
       ...(prog.levelUp ? { levelUp: prog.levelUp } : {}),
+    };
+  }
+
+  // ---- multi-step tables (blackjack) ----
+
+  /**
+   * Open a blackjack hand: stake the bet, commit the deck seed, deal. The
+   * whole shoe derives from the committed secret, so it was fixed before the
+   * first card showed. A natural on either side settles immediately.
+   */
+  newTable(gameId: string, playerAddress: string | undefined, betRaw: unknown, name?: string): TableView {
+    if (gameId !== 'blackjack') throw new Error(`Unknown table game: ${gameId}`);
+    this.sweep();
+    this.settleTournament(Date.now());
+    if (playerAddress) {
+      const last = this.lastPlay.get(playerAddress) ?? 0;
+      if (Date.now() - last < this.cooldown) {
+        throw new Error('Easy there — wait a moment before the next hand.');
+      }
+    }
+    const bet = Math.floor(Number(betRaw ?? 1));
+    if (!Number.isSafeInteger(bet) || bet < 1) throw new Error('Bet must be a whole number of UCT (1+).');
+    const key = this.keyFor(playerAddress);
+    if (playerAddress) this.referralCodes.set(referralCode(key), key);
+    const welcomed = welcomeGrant(this.players.get(key) ?? newPlayerState());
+    let state = welcomed.state;
+    if (state.chips < bet) {
+      throw new Error(`Not enough UCT — you have ${state.chips}. Deposit from your wallet to keep playing.`);
+    }
+    // Stake now; the settle path re-credits it before running (single pipeline).
+    state = { ...state, chips: state.chips - bet };
+    this.players.set(key, state);
+
+    const secret = makeNonce();
+    const nonce = makeNonce();
+    const commit = commitHash(secret, nonce);
+    const roundId = `blackjack-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const table: TableRound = {
+      gameId: 'blackjack',
+      secret,
+      nonce,
+      commit,
+      createdAt: Date.now(),
+      key,
+      ...(playerAddress ? { playerAddress } : {}),
+      ...(name ? { name } : {}),
+      bet,
+      actions: [],
+      hand: bjStart(secret),
+    };
+    this.tables.set(roundId, table);
+    if (playerAddress) this.lastPlay.set(playerAddress, Date.now());
+    if (table.hand.done) return this.settleTable(roundId, table); // a natural
+    return this.tableView(roundId, table);
+  }
+
+  /** Advance an open hand by one action; settles through the standard path when done. */
+  stepTable(roundId: string, actionRaw: unknown, playerAddress?: string): TableView {
+    const table = this.tables.get(roundId);
+    if (!table) throw new Error('Hand not found or already settled — deal a new one.');
+    if (table.key !== this.keyFor(playerAddress)) throw new Error('This is not your hand.');
+    const action = String(actionRaw) as BjAction;
+    if (action !== 'hit' && action !== 'stand' && action !== 'double') {
+      throw new Error('Action must be hit, stand or double.');
+    }
+    if (action === 'double') {
+      // Doubling stakes a second bet — check + take it now.
+      const state = this.players.get(table.key) ?? newPlayerState();
+      if (state.chips < table.bet) {
+        throw new Error(`Doubling needs another ${table.bet} UCT — you have ${state.chips}.`);
+      }
+      this.players.set(table.key, { ...state, chips: state.chips - table.bet });
+      table.bet *= 2;
+    }
+    table.actions.push(action);
+    table.hand = bjStep(table.secret, table.hand, action);
+    if (table.hand.done) return this.settleTable(roundId, table);
+    return this.tableView(roundId, table);
+  }
+
+  /** The open hand's current public view (dealer hole card hidden). */
+  private tableView(roundId: string, table: TableRound): TableView {
+    const state = this.players.get(table.key);
+    return {
+      game: table.gameId,
+      roundId,
+      commit: table.commit,
+      bet: table.bet,
+      jackpotUct: this.pot,
+      hand: bjView(table.hand),
+      ...(state
+        ? {
+            you: {
+              streak: state.streak,
+              best: state.best,
+              daily: dailyView(state, todayKey()),
+              chips: state.chips,
+              chipsGranted: 0,
+            },
+          }
+        : {}),
+    };
+  }
+
+  /** Finish a hand: re-credit the stake, then run the ONE settle pipeline. */
+  private settleTable(roundId: string, table: TableRound): TableView {
+    this.tables.delete(roundId);
+    const state = this.players.get(table.key) ?? newPlayerState();
+    this.players.set(table.key, { ...state, chips: state.chips + table.bet });
+    const judged = bjJudge(table.hand);
+    const result = this.settleJudged({
+      roundId,
+      gameId: table.gameId,
+      secret: table.secret,
+      nonce: table.nonce,
+      commit: table.commit,
+      judged,
+      bet: table.bet,
+      jackpotInput: `bj:${table.actions.join(',') || 'natural'}`,
+      playerAddress: table.playerAddress,
+      name: table.name,
+    });
+    return {
+      game: table.gameId,
+      roundId,
+      commit: table.commit,
+      bet: table.bet,
+      jackpotUct: this.pot,
+      hand: bjView(table.hand),
+      result,
     };
   }
 
@@ -789,6 +995,7 @@ export class GameDealer {
       feed: [...this.feed],
       tournament: this.tourney.snapshot(),
       pendingPrizes: [...this.pendingPrizes.values()],
+      tables: [...this.tables],
     };
   }
 
@@ -823,6 +1030,10 @@ export class GameDealer {
     if (Array.isArray(snap.pendingPrizes)) {
       this.pendingPrizes.clear();
       for (const p of snap.pendingPrizes) this.pendingPrizes.set(p.id, p);
+    }
+    if (Array.isArray(snap.tables)) {
+      this.tables.clear();
+      for (const [id, t] of snap.tables) this.tables.set(id, t);
     }
     this.tourney.restore(snap.tournament);
   }
@@ -943,6 +1154,15 @@ export class GameDealer {
     const now = Date.now();
     for (const [id, r] of this.rounds) {
       if (now - r.createdAt > this.ttl) this.rounds.delete(id);
+    }
+    // An abandoned table hand refunds its stake — walking away isn't a loss.
+    for (const [id, t] of this.tables) {
+      if (now - t.createdAt > this.ttl) {
+        this.tables.delete(id);
+        const state = this.players.get(t.key) ?? newPlayerState();
+        this.players.set(t.key, { ...state, chips: state.chips + t.bet });
+        this.log.info(`table ${id} expired — ${t.bet} UCT stake refunded`);
+      }
     }
   }
 

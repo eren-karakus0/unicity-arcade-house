@@ -307,6 +307,40 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Multi-step tables (blackjack): stake + deal, then advance with actions.
+  if (pathname === '/api/arcade/table/new' && req.method === 'POST') {
+    if (!dealer) {
+      json(res, 503, { error: 'The arcade dealer is still waking up — try again in a few seconds.' });
+      return;
+    }
+    void readJson(req).then((body) => {
+      try {
+        const address = typeof body.address === 'string' ? body.address : undefined;
+        const name = typeof body.name === 'string' ? body.name : undefined;
+        json(res, 200, dealer!.newTable(String(body.game ?? 'blackjack'), address, body.bet, name));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'could not open a hand';
+        json(res, msg.startsWith('Easy there') ? 429 : 400, { error: msg });
+      }
+    });
+    return;
+  }
+  if (pathname === '/api/arcade/table/step' && req.method === 'POST') {
+    if (!dealer) {
+      json(res, 503, { error: 'The arcade dealer is still waking up — try again in a few seconds.' });
+      return;
+    }
+    void readJson(req).then((body) => {
+      try {
+        const address = typeof body.address === 'string' ? body.address : undefined;
+        json(res, 200, dealer!.stepTable(String(body.roundId ?? ''), body.action, address));
+      } catch (e) {
+        json(res, 400, { error: e instanceof Error ? e.message : 'step failed' });
+      }
+    });
+    return;
+  }
+
   if (pathname === '/api/arcade/play' && req.method === 'POST') {
     if (!dealer) {
       json(res, 503, { error: 'The arcade dealer is still waking up — try again in a few seconds.' });

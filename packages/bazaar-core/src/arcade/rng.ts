@@ -90,6 +90,33 @@ export function deriveCrashPointX100(server: string, client: string): number {
 }
 
 /**
+ * Derive a full 52-card deck order from the committed secret alone — the
+ * table-game backbone (blackjack). Cards are 0..51 (rank = card % 13 with
+ * 0 = Ace … 12 = King; suit = floor(card / 13)). Same seeded Fisher–Yates
+ * as deriveMines, chained sha256 randomness, reproducible anywhere from the
+ * reveal: the whole shoe was fixed before the first action.
+ */
+export function deriveDeck(secret: string): number[] {
+  const idx = Array.from({ length: 52 }, (_, i) => i);
+  let block = createHash('sha256').update(`${secret}:deck`).digest('hex');
+  let offset = 0;
+  const draw = (): number => {
+    if (offset + 8 > block.length) {
+      block = createHash('sha256').update(block).digest('hex');
+      offset = 0;
+    }
+    const v = parseInt(block.slice(offset, offset + 8), 16);
+    offset += 8;
+    return v;
+  };
+  for (let i = 51; i > 0; i--) {
+    const j = draw() % (i + 1);
+    [idx[i], idx[j]] = [idx[j]!, idx[i]!];
+  }
+  return idx;
+}
+
+/**
  * Derive the mine layout for a Mines board from the committed secret alone
  * (the player's input is WHICH cells to pick — the layout must be fixed and
  * sealed before that choice, and the commitment proves it was). A seeded
