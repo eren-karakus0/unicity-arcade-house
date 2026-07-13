@@ -2,23 +2,131 @@ import { describe, expect, it } from 'vitest';
 import { commitHash, deriveDicePair, deriveJackpotRoll, derivePlinkoPath, deriveWheelIndex } from './rng.js';
 import {
   GAMES,
+  MINES_CELLS,
+  MINES_COUNT,
+  MINES_MULTIPLIERS,
   PLINKO_MULTIPLIERS,
   PLINKO_ROWS,
   WHEEL_SEGMENTS,
   coinGame,
+  crashGame,
   diceGame,
   highlowGame,
+  limboGame,
+  minesGame,
   numberGame,
   plinkoGame,
   rpsGame,
   wheelGame,
 } from './games/index.js';
+import { deriveCrashPointX100, deriveMines } from './rng.js';
 import { GameDealer } from './game-dealer.js';
 import type { SphereAgent } from '../sphere-agent.js';
 
 describe('arcade game registry', () => {
-  it('registers all seven games by id', () => {
-    expect(Object.keys(GAMES).sort()).toEqual(['coin', 'dice', 'highlow', 'number', 'plinko', 'rps', 'wheel']);
+  it('registers all ten games by id', () => {
+    expect(Object.keys(GAMES).sort()).toEqual([
+      'coin',
+      'crash',
+      'dice',
+      'highlow',
+      'limbo',
+      'mines',
+      'number',
+      'plinko',
+      'rps',
+      'wheel',
+    ]);
+  });
+});
+
+describe('limbo + crash (target-vs-sealed-multiplier)', () => {
+  it('derives the multiplier deterministically from both seeds', () => {
+    const a = deriveCrashPointX100('server-seed', 'client-seed');
+    expect(deriveCrashPointX100('server-seed', 'client-seed')).toBe(a);
+    expect(deriveCrashPointX100('server-seed', 'other-client')).not.toBe(a);
+    expect(a).toBeGreaterThanOrEqual(100);
+    expect(a).toBeLessThanOrEqual(1_000_000);
+  });
+
+  it('wins iff the derived result reaches the target, paying x target', () => {
+    const secret = 'sealed';
+    const resultX100 = deriveCrashPointX100(secret, 'seed1234');
+    const below = (resultX100 - 1) / 100;
+    const above = (resultX100 + 1) / 100;
+    const win = limboGame.judge(secret, limboGame.resolveInput({ target: below, seed: 'seed1234' }));
+    expect(win.outcome).toBe('win');
+    expect(win.rewardMult).toBeCloseTo(below, 2);
+    const lose = limboGame.judge(secret, limboGame.resolveInput({ target: above, seed: 'seed1234' }));
+    expect(lose.outcome).toBe('lose');
+    // Crash shares the exact same fair core, different reveal naming.
+    const crash = crashGame.judge(secret, crashGame.resolveInput({ target: below, seed: 'seed1234' }));
+    expect(crash.outcome).toBe('win');
+    expect(crash.reveal.crashX100).toBe(resultX100);
+  });
+
+  it('rejects out-of-range targets and bad seeds', () => {
+    expect(() => limboGame.resolveInput({ target: 1.0, seed: 'seed1234' })).toThrow(/target/i);
+    expect(() => limboGame.resolveInput({ target: 5000, seed: 'seed1234' })).toThrow(/target/i);
+    expect(() => limboGame.resolveInput({ target: 2, seed: '!!' })).toThrow(/seed/i);
+  });
+
+  it('keeps a flat ~96% RTP across targets (law of the curve, sampled)', () => {
+    // P(result >= t) = 0.96/t exactly, so win-rate x payout ≈ 0.96 for any t.
+    const N = 4000;
+    for (const target of [1.5, 2, 5]) {
+      let wins = 0;
+      for (let i = 0; i < N; i++) {
+        if (deriveCrashPointX100('rtp-secret', `seed-${target}-${i}`) >= target * 100) wins++;
+      }
+      const rtp = (wins / N) * target;
+      expect(rtp).toBeGreaterThan(0.9);
+      expect(rtp).toBeLessThan(1.02);
+    }
+  });
+});
+
+describe('mines (one-shot board)', () => {
+  it('derives a deterministic, distinct, in-range layout', () => {
+    const mines = deriveMines('board-secret', MINES_COUNT, MINES_CELLS);
+    expect(deriveMines('board-secret', MINES_COUNT, MINES_CELLS)).toEqual(mines);
+    expect(mines).toHaveLength(MINES_COUNT);
+    expect(new Set(mines).size).toBe(MINES_COUNT);
+    expect(mines.every((m) => m >= 0 && m < MINES_CELLS)).toBe(true);
+    expect(deriveMines('other-secret', MINES_COUNT, MINES_CELLS)).not.toEqual(mines);
+  });
+
+  it('wins when every pick is safe, loses on any mine', () => {
+    const secret = 'board-secret';
+    const mines = new Set(deriveMines(secret, MINES_COUNT, MINES_CELLS));
+    const safe = Array.from({ length: MINES_CELLS }, (_, i) => i).filter((i) => !mines.has(i));
+    const win = minesGame.judge(secret, minesGame.resolveInput(safe.slice(0, 3)));
+    expect(win.outcome).toBe('win');
+    expect(win.rewardMult).toBe(MINES_MULTIPLIERS[3]);
+    const lose = minesGame.judge(secret, minesGame.resolveInput([safe[0]!, [...mines][0]!]));
+    expect(lose.outcome).toBe('lose');
+    expect((lose.reveal.hit as number[]).length).toBe(1);
+  });
+
+  it('validates picks: 1-8 distinct cells on the board', () => {
+    expect(() => minesGame.resolveInput([])).toThrow(/between 1 and/i);
+    expect(() => minesGame.resolveInput([1, 2, 3, 4, 5, 6, 7, 8, 9])).toThrow(/between 1 and/i);
+    expect(() => minesGame.resolveInput([25])).toThrow(/cells/i);
+    expect(() => minesGame.resolveInput([3, 3])).toThrow(/once/i);
+  });
+
+  it('keeps every bracket at the same ~96% expected return', () => {
+    // payout(K) = 0.96 / P(K safe) with P = C(20,K)/C(25,K).
+    const p = (k: number): number => {
+      let v = 1;
+      for (let i = 0; i < k; i++) v *= (20 - i) / (25 - i);
+      return v;
+    };
+    for (let k = 1; k <= 8; k++) {
+      const ev = MINES_MULTIPLIERS[k]! * p(k);
+      expect(ev).toBeGreaterThan(0.94);
+      expect(ev).toBeLessThan(0.98);
+    }
   });
 });
 

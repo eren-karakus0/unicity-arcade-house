@@ -431,6 +431,11 @@ export class GameDealer {
 
     this.record(name, judged.outcome);
     if (judged.outcome === 'win') this.creditEarned(name, reward);
+    // Notable chip wins join the public house feed (the live ticker) —
+    // bounded, threshold keeps the strip interesting without spamming it.
+    if (judged.outcome === 'win' && reward >= 10) {
+      this.pushEvent({ kind: 'win', at: Date.now(), amountUct: reward, name, game: round.gameId });
+    }
     this.roundsPlayed += 1;
 
     // Progressive jackpot — every round rolls for the whole pot, win or lose.

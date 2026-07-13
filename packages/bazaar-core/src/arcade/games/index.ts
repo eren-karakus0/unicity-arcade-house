@@ -6,6 +6,9 @@ import { highlowGame } from './highlow-game.js';
 import { numberGame } from './numberguess-game.js';
 import { wheelGame, WHEEL_SEGMENTS } from './wheel-game.js';
 import { plinkoGame, PLINKO_MULTIPLIERS, PLINKO_ROWS } from './plinko-game.js';
+import { limboGame, LIMBO_MIN_TARGET_X100, LIMBO_MAX_TARGET_X100 } from './limbo-game.js';
+import { crashGame } from './crash-game.js';
+import { minesGame, MINES_CELLS, MINES_COUNT, MINES_MAX_PICKS, MINES_MULTIPLIERS } from './mines-game.js';
 
 export * from './types.js';
 export {
@@ -16,12 +19,24 @@ export {
   numberGame,
   wheelGame,
   plinkoGame,
+  limboGame,
+  crashGame,
+  minesGame,
   WHEEL_SEGMENTS,
   PLINKO_MULTIPLIERS,
   PLINKO_ROWS,
+  LIMBO_MIN_TARGET_X100,
+  LIMBO_MAX_TARGET_X100,
+  MINES_CELLS,
+  MINES_COUNT,
+  MINES_MAX_PICKS,
+  MINES_MULTIPLIERS,
 };
 
 export const GAME_LIST: readonly Game[] = [
+  crashGame,
+  limboGame,
+  minesGame,
   rpsGame,
   wheelGame,
   plinkoGame,

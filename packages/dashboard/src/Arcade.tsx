@@ -9,8 +9,10 @@ import {
   newRound,
   playRound,
   verifyCommit,
+  verifyCrashPoint,
   verifyDice,
   verifyJackpot,
+  verifyMines,
   verifyPlinko,
   verifyWheel,
   fetchBalance,
@@ -391,16 +393,22 @@ export function Arcade() {
     setSuspense(false);
   };
 
-  const play = async (choice: unknown) => {
+  const play = async (choice: unknown, withSeed = false) => {
     if (!round || status !== 'idle' || hold || !wallet.identity) return;
     setStatus('playing');
     setError(null);
     sfx.click();
+    // Target-plus-seed games (Limbo/Crash): the option carries the target and
+    // the client entropy is minted fresh at the moment of play.
+    const finalChoice =
+      withSeed && choice && typeof choice === 'object'
+        ? { ...(choice as Record<string, unknown>), seed: makeClientSeed() }
+        : choice;
     try {
       const res = await playRound({
         game: selected,
         roundId: round.roundId,
-        choice,
+        choice: finalChoice,
         bet,
         address: addressOf(wallet.identity),
         name: nameOf(wallet.identity),
@@ -475,6 +483,16 @@ export function Arcade() {
             path: res.reveal.path as number[],
             bucketIndex: Number(res.reveal.bucketIndex),
           });
+        }
+        if (ok && (res.game === 'limbo' || res.game === 'crash')) {
+          ok = await verifyCrashPoint(
+            res.secret,
+            String(res.reveal.clientSeed),
+            Number(res.game === 'crash' ? res.reveal.crashX100 : res.reveal.resultX100),
+          );
+        }
+        if (ok && res.game === 'mines') {
+          ok = await verifyMines(res.secret, { mines: res.reveal.mines as number[] });
         }
         if (ok && res.jackpot) {
           ok = await verifyJackpot(res.secret, res.jackpot.input, {
@@ -736,7 +754,13 @@ export function Arcade() {
               </div>
             )}
 
-            {meta.inputKind === 'seed' ? (
+            {ui.Picker ? (
+              <ui.Picker
+                round={round}
+                disabled={!round || status === 'playing' || hold || (you?.chips ?? 0) < bet}
+                onPlay={(choice) => void play(choice)}
+              />
+            ) : meta.inputKind === 'seed' ? (
               <div className="gbtns">
                 <button
                   className="again"
@@ -752,7 +776,7 @@ export function Arcade() {
                   <button
                     key={o.key}
                     className="gbtn"
-                    onClick={() => void play(o.choice)}
+                    onClick={() => void play(o.choice, o.withSeed)}
                     disabled={!round || status === 'playing' || hold || (you?.chips ?? 0) < bet}
                     aria-label={o.name || o.key}
                   >

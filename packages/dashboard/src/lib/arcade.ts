@@ -375,6 +375,45 @@ export async function verifyPlinko(
   );
 }
 
+/** Recompute the Limbo/Crash multiplier — mirrors the server's deriveCrashPointX100. */
+export async function verifyCrashPoint(
+  server: string,
+  client: string,
+  expectedX100: number,
+): Promise<boolean> {
+  const h = await sha256Hex(`${server}:${client}`);
+  const r = (parseInt(h.slice(0, 8), 16) + 1) / 0x100000000;
+  const x100 = Math.max(100, Math.min(1_000_000, Math.floor((0.96 / r) * 100)));
+  return x100 === expectedX100;
+}
+
+/** Recompute the Mines layout — mirrors the server's deriveMines (seeded Fisher–Yates). */
+export async function verifyMines(
+  secret: string,
+  expected: { mines: number[]; cells?: number },
+): Promise<boolean> {
+  const cells = expected.cells ?? 25;
+  const count = expected.mines.length;
+  const idx = Array.from({ length: cells }, (_, i) => i);
+  let block = await sha256Hex(`${secret}:mines`);
+  let offset = 0;
+  const draw = async (): Promise<number> => {
+    if (offset + 8 > block.length) {
+      block = await sha256Hex(block);
+      offset = 0;
+    }
+    const v = parseInt(block.slice(offset, offset + 8), 16);
+    offset += 8;
+    return v;
+  };
+  for (let i = cells - 1; i > 0; i--) {
+    const j = (await draw()) % (i + 1);
+    [idx[i], idx[j]] = [idx[j]!, idx[i]!];
+  }
+  const mines = idx.slice(0, count).sort((a, b) => a - b);
+  return mines.length === expected.mines.length && mines.every((m, i) => m === expected.mines[i]);
+}
+
 /** Recompute the jackpot roll — mirrors the server's deriveJackpotRoll. */
 export async function verifyJackpot(
   secret: string,
