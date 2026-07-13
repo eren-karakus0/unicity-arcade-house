@@ -17,11 +17,13 @@ its own SHA-256. This track polishes it, upgrades it, and makes it visible.
   live on the arcade page, backed by `GET /api/arcade/astrid` (real traces
   only). Bus-routed dispatch remains upstream-blocked with a precise root
   cause (sdk-js predates subscribe-driven delivery — UPSTREAM.md finding 3).
-- [ ] **P1.T1 — LLM strategist**
-  The capsule *reasons* about game/bet/stop instead of picking randomly
-  (kernel LLM binding if exposed to JS capsules, otherwise a capability-gated
-  HTTP LLM call). Hard limits stay enforced in code; fairness verification
-  unchanged.
+- [x] **P1.T1 — LLM strategist** *(shipped 2026-07-13)*
+  The capsule now *reasons* about game/bet/stop over capability-gated HTTP to
+  Gemini — kernel-log sessions show per-round reasoning referencing the
+  session's own history, bets clamped in code, every reveal still verified
+  `fair=true` (PROOF.log). Key rides in the locally-built wasm because the
+  kernel's config surface returns none to JS capsules (UPSTREAM.md finding 4);
+  runtime config is tried first so a fixed kernel takes over automatically.
 - [ ] **P1.T2 — Multi-capsule composition**
   Strategist ↔ player capsules talking over the IPC bus, and/or a small
   "bot league" of strategy variants racing on the leaderboard.
