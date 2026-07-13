@@ -35,11 +35,14 @@ Trust boundaries, by construction:
   any parse/validation failure falls back to the entropy picker.
 - **Fairness verification is untouched** — every reveal is still re-verified
   in-capsule regardless of who chose the move.
-- **The key never enters the repo**: `install-wsl.sh` injects it into the
-  *staged* `Capsule.toml` as an `[env]` entry at install time (the kernel
-  hands `[env]` to the capsule via `astrid:sys` get-config). The manifest's
-  `net` allow-list is the arcade + `generativelanguage.googleapis.com` —
-  nothing else is reachable.
+- **The key never enters the repo**: it is baked into the *locally built*
+  wasm at build time (`gen-local-key.mjs`, gitignored output; `target/` is
+  never committed). Runtime config is tried FIRST — but on astrid 0.9.4 the
+  whole config surface returns none to JS capsules (even the kernel's own
+  `ASTRID_SOCKET_PATH` builtin; see UPSTREAM.md finding 4), so the local
+  build is the delivery that provably works today, and a fixed kernel/SDK
+  takes over automatically. The manifest's `net` allow-list is the arcade +
+  `generativelanguage.googleapis.com` — nothing else is reachable.
 - **No key → no drama**: the entropy picker plays exactly as before
   (`strategist=entropy` in the session summary).
 

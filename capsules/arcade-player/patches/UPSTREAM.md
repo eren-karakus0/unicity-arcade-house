@@ -162,7 +162,38 @@ unexpectedly` and a restart storm (5 attempts). The run loop must block
 forever; worth documenting in the SDK docs (the naive "signal and return"
 reading of the API is fatal).
 
-## Environment (Findings 2-3)
+## Finding 4 (2026-07-13): the whole config surface returns none to JS capsules
+### `astrid:sys get-config` sees nothing — not even kernel builtins
+
+On astrid 0.9.4, `env.tryGet(...)` (→ `astrid:sys/host@1.0.0 get-config`)
+returns `none` for **every** key from a JS capsule, in BOTH the lifecycle and
+the runtime (`@run`) instance:
+
+- manifest `[env]` defaults (`GEMINI_API_KEY = { type = "string", default = "…" }`) → none
+- values set via `astrid capsule config <name> --set KEY=VALUE` (stored at
+  `~/.astrid/home/<principal>/.config/env/<name>.env.json`, confirmed by
+  `--show`, capsule reloaded) → none
+- the kernel's own injected builtin `ASTRID_SOCKET_PATH` (the SDK's documented
+  `CONFIG_SOCKET_PATH` control) → none
+
+Probe log (also in ../PROOF.log): `[strategist] config probe (upgrade):
+GEMINI_API_KEY unset, ASTRID_SOCKET_PATH unset`.
+
+Schema notes discovered on the way (useful for docs): manifest `[env]` values
+must be `EnvDef` structs — a bare string fails with `expected struct EnvDef`,
+and `type` is required (`{ type = "string" | "secret", default = "…" }` both
+pass `astrid capsule check`). `type = "secret"` presumably keeps the value in
+the SecretStore by design ("the value never leaves the SecretStore",
+sdk elicit.js), but `type = "string"` not arriving either — and the builtin
+socket path missing — points at the host get-config binding for JS capsules,
+not at secret semantics.
+
+**Workaround used here:** the strategist's key is baked into the locally-built
+wasm at build time (`gen-local-key.mjs`, gitignored output, `target/` never
+committed) with runtime config tried first, so a fixed kernel/SDK takes over
+automatically.
+
+## Environment (Findings 2-4)
 
 - astrid 0.9.4 (also 0.9.1) release binaries, x86_64-unknown-linux-gnu, WSL2 Ubuntu 24.04
 - @unicity-astrid/sdk 0.1.0 + build 0.1.0 (npm latest as of 2026-07-12), Node 22

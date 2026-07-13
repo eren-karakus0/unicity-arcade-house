@@ -5,8 +5,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "node patch-sdk.mjs",
-    "build": "astrid-js-build . --out target/arcade-player.wasm",
+    "postinstall": "node patch-sdk.mjs && node gen-local-key.mjs",
+    "build": "node gen-local-key.mjs && astrid-js-build . --out target/arcade-player.wasm",
     "build:ts": "tsc"
   },
   "dependencies": {

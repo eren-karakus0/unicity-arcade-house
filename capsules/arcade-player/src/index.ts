@@ -21,6 +21,7 @@ import {
   time,
   runtime,
 } from "@unicity-astrid/sdk";
+import { LOCAL_GEMINI_KEY } from "./local-key.js";
 
 const BACKEND = "https://sphere-agent-bazaar-backend.onrender.com";
 /** The capsule's arcade identity (its balance key at the house). */
@@ -258,7 +259,9 @@ function playOne(game: GameId, bet: number): RoundReport {
 /* ------------------------------------------------------------------ */
 
 const MAX_BET = 3; // hard in-code cap per round, whatever the LLM says
-const LLM_MODEL = "gemini-2.0-flash";
+// gemini-flash-latest: Google retired the free-tier quota of pinned 2.0-flash
+// (limit: 0 as of 2026-07); the -latest alias survives model rotations.
+const LLM_MODEL = "gemini-flash-latest";
 
 interface Decision {
   game: GameId;
@@ -286,7 +289,10 @@ function llmDecide(state: {
   roundsLeft: number;
   history: RoundBrief[];
 }): Decision | null {
-  const key = env.get("GEMINI_API_KEY");
+  // Runtime config first (future kernels), then the build-time baked key —
+  // on astrid 0.9.4 get-config returns none for EVERY key (UPSTREAM.md
+  // finding 4), so the local build is the delivery that provably works.
+  const key = env.get("GEMINI_API_KEY") || LOCAL_GEMINI_KEY;
   if (!key) return null;
   const prompt = [
     "You are the strategist for an autonomous player at a provably-fair arcade.",
@@ -308,14 +314,40 @@ function llmDecide(state: {
         .header("x-goog-api-key", key)
         .json({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 200, responseMimeType: "application/json" },
+          generationConfig: {
+            temperature: 0.4,
+            // Room for the answer even if the model spends tokens thinking…
+            maxOutputTokens: 1024,
+            // …but prefer no thinking at all: flash-latest resolves to a
+            // thinking model whose thought tokens otherwise eat the budget
+            // (observed: ~25s calls returning empty/truncated parts).
+            thinkingConfig: { thinkingBudget: 0 },
+            responseMimeType: "application/json",
+          },
         }),
     );
     const body = res.json<{
       candidates?: { content?: { parts?: { text?: string }[] } }[];
+      error?: { message?: string };
     }>();
-    const text = body.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    const parsed = JSON.parse(text) as { game?: unknown; bet?: unknown; stop?: unknown; reason?: unknown };
+    if (body.error) {
+      log.warn(`[strategist] LLM API error: ${String(body.error.message ?? "unknown").slice(0, 120)}`);
+      return null;
+    }
+    // Join all parts and tolerate markdown fences / prose around the JSON.
+    const raw = (body.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      log.warn(`[strategist] LLM reply had no JSON (starts: "${raw.slice(0, 60)}")`);
+      return null;
+    }
+    const parsed = JSON.parse(raw.slice(start, end + 1)) as {
+      game?: unknown;
+      bet?: unknown;
+      stop?: unknown;
+      reason?: unknown;
+    };
     // Hard limits live HERE, not in the prompt: validate the game against the
     // known menu, clamp the bet to [1, MAX_BET] and never above the balance.
     const game = (GAMES as readonly string[]).includes(String(parsed.game)) ? (String(parsed.game) as GameId) : null;
@@ -529,6 +561,10 @@ export class ArcadePlayer {
   daemon(): void {
     runtime.signalReady();
     log.info("arcade-player ready on the floor");
+    // Play a session from the RUNTIME instance too: per-principal env config
+    // (astrid capsule config --set) may only be bound here, not in the
+    // lifecycle instance - so this is where the LLM strategist gets its key.
+    walkOntoTheFloor("daemon");
     for (;;) time.sleepMs(1_000);
   }
 
@@ -539,13 +575,13 @@ export class ArcadePlayer {
       sha256Hex("abc") === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     if (!ok) throw new Error("sha256 self-test failed");
     log.info("arcade-player installed — sha256 self-test passed, hitting the floor");
-    walkOntoTheFloor();
+    walkOntoTheFloor("install");
   }
 
   @upgrade
   onUpgrade(): void {
     log.info("arcade-player upgraded — back on the floor");
-    walkOntoTheFloor();
+    walkOntoTheFloor("upgrade");
   }
 }
 
@@ -560,8 +596,14 @@ export class ArcadePlayer {
  * Each move is decided by the LLM strategist (validated + clamped in code);
  * without a key, the entropy picker plays exactly as before.
  */
-function walkOntoTheFloor(): void {
+function walkOntoTheFloor(context: string): void {
   try {
+    // Presence probe (never the value): which instance kinds can see config?
+    // ASTRID_SOCKET_PATH is a kernel-injected builtin - the control: if IT is
+    // readable but our [env] key is not, the env-config binding is the gap.
+    const keyState = env.tryGet("GEMINI_API_KEY") === undefined ? "unset" : "SET";
+    const ctlState = env.tryGet("ASTRID_SOCKET_PATH") === undefined ? "unset" : "SET";
+    log.info(`[strategist] config probe (${context}): GEMINI_API_KEY ${keyState}, ASTRID_SOCKET_PATH ${ctlState}`);
     const lb = get<Leaderboard>("/api/arcade/leaderboard");
     const jackpotUct = lb.houseStats?.jackpotUct ?? null;
     log.info(`[floor] house=@${lb.house ?? "?"} jackpot=${jackpotUct ?? "?"} UCT`);
