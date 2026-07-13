@@ -45,9 +45,13 @@ its own SHA-256. This track polishes it, upgrades it, and makes it visible.
 Benchmarked against today's provably-fair leaders (crash/mines/limbo, seed
 verification, VIP/races, live feeds).
 
-- [ ] **P2.T1 — Live-arcade feel**: Limbo · single-player Crash (committed
-  crash point, claim model) · one-shot Mines · a public live win/deposit
-  ticker.
+- [x] **P2.T1 — Live-arcade feel** *(shipped 2026-07-13)*: **Limbo** and
+  **Crash** (target vs sealed multiplier on a flat-96%-RTP curve, two-seed
+  fair) and one-shot **Mines** (5 sealed mines on 5×5, brackets up to ×8.39,
+  layout reproducible from the reveal) — all browser-verifiable, wired into
+  the existing fairness check; the live-payouts ticker now carries notable
+  chip wins too. 10 games in the hall; smoke-verified live (real limbo +
+  mines rounds judged correctly on deploy).
 - [ ] **P2.T2 — Trust layer**: player-editable client seeds · a `/verify`
   page that recomputes any past round in the browser · a Fairness & Solvency
   page (per-game RTP + live treasury).
