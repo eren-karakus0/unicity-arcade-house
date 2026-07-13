@@ -1,12 +1,20 @@
 /**
- * Autonomous Players panel — the Astrid OS capsule that plays this arcade on
- * its own. Everything shown is a REAL trace from the backend (its live chip
- * balance and leaderboard record); the runtime facts narrate where it runs:
- * a WASM sandbox whose only network capability is this arcade, re-verifying
- * every provably-fair reveal with its own in-capsule SHA-256.
+ * Autonomous Players panel — the Astrid OS bot league. One sandboxed capsule,
+ * several strategist personas: each with its own arcade identity, its own
+ * risk appetite in the LLM brief, and its own leaderboard row. Everything
+ * shown is a REAL trace from the backend (live chip balances and win/loss
+ * records); the runtime facts narrate where they run: a WASM sandbox whose
+ * only network capabilities are this arcade and the LLM they consult, with
+ * every provably-fair reveal re-verified in-capsule.
  */
 import { useEffect, useState } from 'react';
 import { fetchAstrid, type AstridView } from '../lib/arcade';
+
+const STYLE_ICON: Record<string, string> = {
+  balanced: '◐',
+  aggressive: '▲',
+  cautious: '◇',
+};
 
 export function AstridPanel() {
   const [view, setView] = useState<AstridView | null>(null);
@@ -29,14 +37,18 @@ export function AstridPanel() {
     };
   }, []);
 
-  if (!view?.ready || !view.board) return null;
-  const { board } = view;
+  const league = (view?.league ?? []).filter((b) => b.board);
+  if (!view?.ready || league.length === 0) return null;
+  // Standings: net earnings on the board, then wins.
+  const standings = [...league].sort(
+    (a, b) => (b.board!.earnedUct - a.board!.earnedUct) || (b.board!.wins - a.board!.wins),
+  );
 
   return (
     <div className="astrid">
       <div className="astrid__head">
         <div>
-          <span className="astrid__title">Autonomous players</span>
+          <span className="astrid__title">Autonomous players — the bot league</span>
           <span className="astrid__sub">machine economy · both sides of the table</span>
         </div>
         <span className="astrid__badge" title="Runs on the Astrid OS WASM microkernel">
@@ -45,21 +57,29 @@ export function AstridPanel() {
       </div>
 
       <div className="astrid__body">
-        <div className="astrid__who">
-          <span className="astrid__name">@{view.name}</span>
-          <span className="astrid__record">
-            {board.wins}W · {board.losses}L · {board.ties}T over {board.played} rounds
-            {typeof view.balanceUct === 'number' ? <> · {view.balanceUct} UCT at the table</> : null}
-          </span>
-        </div>
+        <ul className="astrid__league">
+          {standings.map((b, i) => (
+            <li key={b.identity} className="astrid__bot">
+              <span className="astrid__rank">#{i + 1}</span>
+              <span className="astrid__name">
+                {STYLE_ICON[b.style] ?? '•'} @{b.name}
+              </span>
+              <span className="astrid__style">{b.style}</span>
+              <span className="astrid__record">
+                {b.board!.wins}W · {b.board!.losses}L · {b.board!.ties}T
+                {' · '}
+                {b.balanceUct} UCT
+              </span>
+            </li>
+          ))}
+        </ul>
         <p className="astrid__story">
-          This player is not a person. It&rsquo;s a capsule on {view.runtime?.kernel ?? 'Astrid OS'} —
-          a {view.runtime?.sandbox ?? 'WASM sandbox'} whose only network capabilities are this
-          arcade and the LLM its strategist consults. Each round it <b>reasons</b> about which
-          game to play, how much to stake, and when to walk away (hard limits enforced in code),
-          bets real testnet UCT against the house agent, and{' '}
-          <b>re-verifies every provably-fair reveal with its own SHA-256</b> before trusting a
-          single result. An agent playing an agent, with the receipts to prove it.
+          These players are not people. They&rsquo;re strategist personas of one capsule on{' '}
+          {view.runtime?.kernel ?? 'Astrid OS'} — a WASM sandbox whose only network capabilities
+          are this arcade and the LLM they consult. Each persona <b>reasons</b> about every move
+          with its own risk appetite (hard limits enforced in code), bets real testnet UCT against
+          the house agent, and <b>re-verifies every provably-fair reveal with its own SHA-256</b>{' '}
+          before trusting a single result. Agents playing an agent, racing each other on the board.
         </p>
         <div className="astrid__links">
           {view.proofUrl && (

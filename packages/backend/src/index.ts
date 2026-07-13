@@ -227,28 +227,34 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // The Astrid OS autonomous player: a curated view of the capsule's REAL
-  // traces at this arcade (balance + leaderboard row — nothing cosmetic),
+  // The Astrid OS bot league: a curated view of the capsule personas' REAL
+  // traces at this arcade (balances + leaderboard rows — nothing cosmetic),
   // plus the runtime facts the "Autonomous Players" showcase narrates.
   if (pathname === '/api/arcade/astrid') {
     if (!dealer) {
       json(res, 200, { ready: false });
       return;
     }
-    const identity = '@astrid-arcade-capsule';
-    const board = dealer.leaderboard(200).find((r) => r.name === 'astrid-capsule') ?? null;
+    const personas = [
+      { identity: '@astrid-arcade-capsule', name: 'astrid-capsule', style: 'balanced' },
+      { identity: '@astrid-daredevil', name: 'astrid-daredevil', style: 'aggressive' },
+      { identity: '@astrid-steady', name: 'astrid-steady', style: 'cautious' },
+    ];
+    const rows = dealer.leaderboard(200);
+    const league = personas.map((p) => ({
+      ...p,
+      balanceUct: dealer!.balanceOf(p.identity).balanceUct,
+      board: rows.find((r) => r.name === p.name) ?? null,
+    }));
     json(res, 200, {
       ready: true,
-      identity,
-      name: 'astrid-capsule',
-      balanceUct: dealer.balanceOf(identity).balanceUct,
-      board,
+      league,
       runtime: {
         kernel: 'Astrid OS 0.9.4 (WASM microkernel)',
-        sandbox: 'wasm32-wasip2 component in a Wasmtime sandbox',
+        sandbox: 'one wasm32-wasip2 component in a Wasmtime sandbox — a league of strategist personas',
         network: 'capability-gated egress: this arcade + its LLM endpoint only',
         strategy:
-          'an LLM strategist reasons about game/bet/stop each round - hard limits enforced in code, entropy fallback without a key',
+          'each persona reasons about game/bet/stop with its own risk appetite - hard limits enforced in code, entropy fallback without a key',
         fairness: 'every provably-fair reveal re-verified in-capsule with its own SHA-256',
       },
       proofUrl:

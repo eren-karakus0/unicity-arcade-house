@@ -28,6 +28,47 @@ const BACKEND = "https://sphere-agent-bazaar-backend.onrender.com";
 const IDENTITY = "@astrid-arcade-capsule";
 const NAME = "astrid-capsule";
 
+/**
+ * The bot league (P1.T2): one sandboxed capsule, several strategist personas —
+ * each with its own arcade identity, its own risk appetite baked into the LLM
+ * brief, and its own leaderboard row. Capsule-to-capsule IPC composition is
+ * upstream-blocked (a JS capsule can PUBLISH but never RECEIVES topics —
+ * UPSTREAM.md finding 3, proved by capsules/league-pinger), so the league
+ * lives inside one capsule and the personas compete on the public board.
+ */
+interface Persona {
+  identity: string;
+  name: string;
+  style: string;
+  /** Per-persona bet ceiling; always <= the global MAX_BET code clamp. */
+  maxBet: number;
+  rounds: number;
+}
+
+const PERSONAS: readonly Persona[] = [
+  {
+    identity: IDENTITY,
+    name: NAME,
+    style: "balanced: mix games, moderate stakes, stop when the session turns clearly bad",
+    maxBet: 2,
+    rounds: 2,
+  },
+  {
+    identity: "@astrid-daredevil",
+    name: "astrid-daredevil",
+    style: "aggressive: chase the biggest multipliers and the jackpot, bet at your ceiling",
+    maxBet: 3,
+    rounds: 2,
+  },
+  {
+    identity: "@astrid-steady",
+    name: "astrid-steady",
+    style: "cautious: protect the bankroll, prefer the highest win-probability games, minimum bets, stop early after losses",
+    maxBet: 1,
+    rounds: 2,
+  },
+] as const;
+
 /* ------------------------------------------------------------------ */
 /* SHA-256 (pure TS — the capsule trusts no one, including the house)  */
 /* ------------------------------------------------------------------ */
@@ -222,16 +263,16 @@ interface RoundReport {
   jackpotHit: boolean;
 }
 
-function playOne(game: GameId, bet: number): RoundReport {
-  const nr = post<NewRound>("/api/arcade/new", { game, address: IDENTITY });
+function playOne(game: GameId, bet: number, identity = IDENTITY, name = NAME): RoundReport {
+  const nr = post<NewRound>("/api/arcade/new", { game, address: identity });
   if (!nr.roundId) throw new Error(nr.error ?? "could not open a round");
   const choice = CHOOSE[game]();
   const pr = post<PlayResult>("/api/arcade/play", {
     roundId: nr.roundId,
     choice,
     bet,
-    address: IDENTITY,
-    name: NAME,
+    address: identity,
+    name,
   });
   if (!pr.reveal) throw new Error(pr.error ?? "play failed");
   const fair = verifyFairness(game, pr, nr.commit, choice);
@@ -288,14 +329,19 @@ function llmDecide(state: {
   jackpotUct: number | null;
   roundsLeft: number;
   history: RoundBrief[];
+  /** Persona flavor + per-persona bet ceiling (league play). */
+  style?: string;
+  maxBet?: number;
 }): Decision | null {
   // Runtime config first (future kernels), then the build-time baked key —
   // on astrid 0.9.4 get-config returns none for EVERY key (UPSTREAM.md
   // finding 4), so the local build is the delivery that provably works.
   const key = env.get("GEMINI_API_KEY") || LOCAL_GEMINI_KEY;
   if (!key) return null;
+  const betCap = Math.min(MAX_BET, Math.max(1, state.maxBet ?? MAX_BET));
   const prompt = [
     "You are the strategist for an autonomous player at a provably-fair arcade.",
+    ...(state.style ? [`Your persona: ${state.style}. Stay in character.`] : []),
     "Games (multiplier on win, rough win odds): rps x2 ~1/3 (ties push), coin x2 1/2,",
     "highlow x2 ~1/2, dice x2 ~15/36, wheel x2 ~5/12, plinko x2..x4 mixed, number x5 1/6.",
     "Every round also rolls a side jackpot. You cannot influence outcomes - they are",
@@ -304,7 +350,7 @@ function llmDecide(state: {
     `Rounds left in this session: ${state.roundsLeft}.`,
     `History this session: ${state.history.length === 0 ? "(none yet)" : JSON.stringify(state.history)}.`,
     'Reply with ONLY this JSON: {"game":"rps|wheel|plinko|dice|coin|highlow|number",',
-    `"bet":1-${MAX_BET},"stop":true|false,"reason":"<one short sentence>"}`,
+    `"bet":1-${betCap},"stop":true|false,"reason":"<one short sentence>"}`,
   ].join("\n");
   try {
     const res = http.send(
@@ -349,10 +395,10 @@ function llmDecide(state: {
       reason?: unknown;
     };
     // Hard limits live HERE, not in the prompt: validate the game against the
-    // known menu, clamp the bet to [1, MAX_BET] and never above the balance.
+    // known menu, clamp the bet to [1, betCap] and never above the balance.
     const game = (GAMES as readonly string[]).includes(String(parsed.game)) ? (String(parsed.game) as GameId) : null;
     if (!game) return null;
-    const bet = Math.min(Math.max(1, Math.floor(Number(parsed.bet) || 1)), MAX_BET, Math.max(1, state.balance));
+    const bet = Math.min(Math.max(1, Math.floor(Number(parsed.bet) || 1)), betCap, Math.max(1, state.balance));
     return {
       game,
       bet,
@@ -372,6 +418,8 @@ function decideNext(state: {
   jackpotUct: number | null;
   roundsLeft: number;
   history: RoundBrief[];
+  style?: string;
+  maxBet?: number;
 }): Decision {
   return llmDecide(state) ?? entropyDecision();
 }
@@ -508,6 +556,17 @@ export class ArcadePlayer {
    * The kernel routes `cli.v1.command.run.arcade-player` here; we reply on
    * the per-request result topic (capsule-space wire contract).
    */
+  /**
+   * League ping — the capsule-to-capsule composition probe (P1.T2). Fires iff
+   * the kernel delivers subscribed bus topics to this JS capsule; the entry
+   * log is the whole verdict (see UPSTREAM.md finding 3).
+   */
+  @interceptor("league.ping")
+  leaguePing(payload: unknown): { handled: boolean } {
+    log.info(`[league] ping received: ${JSON.stringify(payload ?? null).slice(0, 160)}`);
+    return { handled: true };
+  }
+
   @interceptor("cli.run")
   cliRun(payload: { req_id?: string; command?: string; args?: string[] } | undefined): {
     handled: boolean;
@@ -586,15 +645,12 @@ export class ArcadePlayer {
 }
 
 /**
- * A short autonomous session played straight from the capsule's lifecycle
- * hook — the whole machine-economy loop (open round → bet real UCT → verify
- * the provably-fair reveal) executes INSIDE the Astrid kernel's WASM sandbox
- * and reports to the kernel log. (Bus-routed tool dispatch needs the JS
- * SDK's daemon mode, which is still alpha on released kernels — lifecycle
- * hooks are the proven execution path today.)
- *
- * Each move is decided by the LLM strategist (validated + clamped in code);
- * without a key, the entropy picker plays exactly as before.
+ * The league walks onto the floor — played straight from the capsule's
+ * lifecycle hooks and daemon start: each persona (its own arcade identity,
+ * its own risk appetite in the LLM brief, its own leaderboard row) plays a
+ * short session, every move decided by the strategist (validated + clamped
+ * in code) and every reveal re-verified in-sandbox. Without a key the
+ * entropy picker plays for everyone.
  */
 function walkOntoTheFloor(context: string): void {
   try {
@@ -606,55 +662,69 @@ function walkOntoTheFloor(context: string): void {
     log.info(`[strategist] config probe (${context}): GEMINI_API_KEY ${keyState}, ASTRID_SOCKET_PATH ${ctlState}`);
     const lb = get<Leaderboard>("/api/arcade/leaderboard");
     const jackpotUct = lb.houseStats?.jackpotUct ?? null;
-    log.info(`[floor] house=@${lb.house ?? "?"} jackpot=${jackpotUct ?? "?"} UCT`);
-    let balance = get<{ balanceUct: number }>(
-      `/api/arcade/balance?address=${encodeURIComponent(IDENTITY)}`,
-    ).balanceUct;
-    const MAX_ROUNDS = 4;
-    const rounds: RoundReport[] = [];
-    const history: RoundBrief[] = [];
-    let llmUsed = false;
-    for (let i = 0; i < MAX_ROUNDS; i++) {
-      const d = decideNext({
-        balance: Math.max(1, balance),
-        jackpotUct,
-        roundsLeft: MAX_ROUNDS - i,
-        history,
-      });
-      if (d.source === "llm") llmUsed = true;
-      log.info(
-        `[strategist] ${d.source}: ${d.stop ? "STOP" : `play ${d.game} bet=${d.bet}`} — ${d.reason}`,
-      );
-      if (d.stop) break;
-      const r = playOne(d.game, d.bet);
-      rounds.push(r);
-      history.push({ game: r.game, bet: r.bet, outcome: r.outcome, rewardUct: r.rewardUct });
-      balance = r.balance;
-      log.info(
-        `[floor] round ${i + 1}: ${r.game} bet=${r.bet} → ${r.outcome} +${r.rewardUct} UCT ` +
-          `(balance ${r.balance}) fair=${r.fair.allOk}${r.jackpotHit ? " JACKPOT!" : ""}`,
-      );
-      if (r.balance < 1) break;
+    log.info(`[floor] house=@${lb.house ?? "?"} jackpot=${jackpotUct ?? "?"} UCT — the league walks in`);
+    const league: Record<string, unknown>[] = [];
+    for (const p of PERSONAS) {
+      const summary = playPersonaSession(p, jackpotUct);
+      league.push({ name: p.name, ...summary });
       time.sleepMs(950);
     }
-    const net = rounds.reduce((a, r) => a + r.rewardUct - r.bet, 0);
-    const allFair = rounds.every((r) => r.fair.allOk);
-    const summary = {
-      rounds: rounds.length,
-      wins: rounds.filter((r) => r.outcome === "win").length,
-      netUct: net,
-      endBalance: rounds[rounds.length - 1]?.balance ?? balance,
-      allFair,
-      strategist: llmUsed ? "llm" : "entropy",
-      at: Number(time.nowMs()),
-    };
-    kv.set("last-session", summary);
-    log.info(
-      `[floor] session over: ${summary.rounds} rounds, ${summary.wins} wins, net ${net >= 0 ? "+" : ""}${net} UCT, ` +
-        `balance ${summary.endBalance}, strategist=${summary.strategist}, every reveal verified fair=${allFair}`,
-    );
+    kv.set("league-last", { at: Number(time.nowMs()), context, league });
+    log.info(`[league] round complete: ${JSON.stringify(league.map((b) => `${b.name}:${b.netUct}`))}`);
   } catch (e) {
     // A hiccup on the floor must never fail the install itself.
-    log.warn(`[floor] session skipped: ${(e as Error).message ?? String(e)}`);
+    log.warn(`[floor] league round skipped: ${(e as Error).message ?? String(e)}`);
   }
+}
+
+/** One persona's short session: fetch balance, reason each move, play, report. */
+function playPersonaSession(
+  p: Persona,
+  jackpotUct: number | null,
+): { rounds: number; wins: number; netUct: number; endBalance: number; allFair: boolean; strategist: string } {
+  let balance = get<{ balanceUct: number }>(
+    `/api/arcade/balance?address=${encodeURIComponent(p.identity)}`,
+  ).balanceUct;
+  const rounds: RoundReport[] = [];
+  const history: RoundBrief[] = [];
+  let llmUsed = false;
+  for (let i = 0; i < p.rounds; i++) {
+    const d = decideNext({
+      balance: Math.max(1, balance),
+      jackpotUct,
+      roundsLeft: p.rounds - i,
+      history,
+      style: p.style,
+      maxBet: p.maxBet,
+    });
+    if (d.source === "llm") llmUsed = true;
+    log.info(
+      `[league] ${p.name} (${d.source}): ${d.stop ? "STOP" : `play ${d.game} bet=${d.bet}`} — ${d.reason}`,
+    );
+    if (d.stop) break;
+    const r = playOne(d.game, Math.min(d.bet, p.maxBet), p.identity, p.name);
+    rounds.push(r);
+    history.push({ game: r.game, bet: r.bet, outcome: r.outcome, rewardUct: r.rewardUct });
+    balance = r.balance;
+    log.info(
+      `[league] ${p.name} round ${i + 1}: ${r.game} bet=${r.bet} → ${r.outcome} +${r.rewardUct} UCT ` +
+        `(balance ${r.balance}) fair=${r.fair.allOk}${r.jackpotHit ? " JACKPOT!" : ""}`,
+    );
+    if (r.balance < 1) break;
+    time.sleepMs(950);
+  }
+  const net = rounds.reduce((a, r) => a + r.rewardUct - r.bet, 0);
+  const summary = {
+    rounds: rounds.length,
+    wins: rounds.filter((r) => r.outcome === "win").length,
+    netUct: net,
+    endBalance: rounds[rounds.length - 1]?.balance ?? balance,
+    allFair: rounds.every((r) => r.fair.allOk),
+    strategist: llmUsed ? "llm" : "entropy",
+  };
+  log.info(
+    `[league] ${p.name} session: ${summary.rounds} rounds, ${summary.wins} wins, net ${net >= 0 ? "+" : ""}${net} UCT, ` +
+      `balance ${summary.endBalance}, strategist=${summary.strategist}, fair=${summary.allFair}`,
+  );
+  return summary;
 }

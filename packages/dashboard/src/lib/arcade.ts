@@ -217,13 +217,19 @@ export async function fetchTournament(): Promise<TournamentView> {
   return (await r.json()) as TournamentView;
 }
 
-/** The Astrid OS autonomous player's real traces + runtime facts. */
+/** One Astrid bot-league persona's real traces. */
+export interface AstridBot {
+  identity: string;
+  name: string;
+  style: string;
+  balanceUct: number;
+  board: LeaderRow | null;
+}
+
+/** The Astrid OS bot league's real traces + runtime facts. */
 export interface AstridView {
   ready: boolean;
-  identity?: string;
-  name?: string;
-  balanceUct?: number;
-  board?: LeaderRow | null;
+  league?: AstridBot[];
   runtime?: { kernel: string; sandbox: string; network: string; strategy?: string; fairness: string };
   proofUrl?: string;
   docsUrl?: string;

@@ -51,6 +51,29 @@ binding is reachable over IPC topics, which the published JS SDK cannot yet
 receive (UPSTREAM.md finding 3) — the capability-gated HTTP path is the one
 that provably works today.
 
+## The bot league (P1.T2)
+
+Capsule-to-capsule composition (a strategist capsule driving a player capsule
+over the IPC bus) is upstream-blocked on today's published JS SDK — and we
+built the probe to prove exactly where: [`capsules/league-pinger`](../capsules/league-pinger)
+publishes `arcade.v1.league.ping`; the kernel log shows a JS capsule **can
+publish** from its `@run` instance but the subscribed JS capsule **never
+receives** (UPSTREAM.md finding 3 addendum).
+
+So the league lives inside one capsule: **three strategist personas**, each
+with its own arcade identity, its own risk appetite woven into the LLM brief,
+and its own row on the public leaderboard —
+
+| persona | style | ceiling |
+|---|---|---|
+| `@astrid-arcade-capsule` | balanced | 2 UCT/round |
+| `@astrid-daredevil` | aggressive — chases multipliers and the jackpot | 3 UCT/round |
+| `@astrid-steady` | cautious — protects the bankroll, stops early | 1 UCT/round |
+
+Every persona's moves go through the same in-code clamps and the same
+in-sandbox fairness verification; the league standings are live on the arcade
+page ("Autonomous players — the bot league", backed by `GET /api/arcade/astrid`).
+
 ## The capsule
 
 - **Tools** (declared in `Capsule.toml`, dispatched once upstream matures):
@@ -91,6 +114,10 @@ patched locally via [`patch-sdk.mjs`](../capsules/arcade-player/patch-sdk.mjs)
 # 1. Build the component (any OS with Node >= 20)
 cd capsules/arcade-player
 npm install                 # postinstall applies the SDK patch
+# One-time npm-layout aliasing (published build tool expects paths npm doesn't
+# create; the alias MUST be a link, not a copy — see UPSTREAM.md finding 3):
+#   node_modules/@unicity-astrid/astrid-sdk -> link/junction to ./sdk
+#   node_modules/contracts                  -> copy of @unicity-astrid/contracts
 npx astrid-js-build . --out target/arcade-player.wasm
 
 # 2. Install on the kernel (Linux x86_64; astrid 0.9.0 release binary)

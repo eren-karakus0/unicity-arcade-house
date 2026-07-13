@@ -32,6 +32,10 @@ net = [
 
 [subscribe]
 "cli.v1.command.run.arcade-player" = { wit = "opaque" }
+# League ping: capsule-to-capsule composition probe (P1.T2) - another capsule
+# (or astrid-emit) publishes here; if our interceptor fires, JS capsules can
+# receive bus topics and the strategist<->player split is viable.
+"arcade.v1.league.ping" = { wit = "opaque" }
 
 [[command]]
 name = "arcade"
@@ -41,6 +45,10 @@ kind = "cli"
 [[interceptor]]
 event = "cli.v1.command.run.arcade-player"
 action = "cli.run"
+
+[[interceptor]]
+event = "arcade.v1.league.ping"
+action = "league.ping"
 
 [[tool]]
 name = "status"

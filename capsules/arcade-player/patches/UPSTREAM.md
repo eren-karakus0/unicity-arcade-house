@@ -154,6 +154,31 @@ run loop (both work, PROOF.log), but not whatever guest export current kernels
 call to deliver bus topics. JS capsules therefore cannot receive tools/CLI
 dispatch until sdk-js ships that interface.
 
+### Addendum (2026-07-13): capsule-to-capsule probe makes it airtight
+
+A dedicated probe capsule (`capsules/league-pinger`, Capsule.toml `[publish]
+"arcade.v1.league.ping"`) publishing to a topic the arcade-player capsule
+subscribes to, both loaded in the same daemon:
+
+- **JS publish WORKS from the `@run` (runtime) instance** — kernel log:
+  `[pinger] published arcade.v1.league.ping (daemon)`.
+- **JS publish FAILS from lifecycle instances** — `[HostError]
+  ipc.publish(...)` during install/upgrade hooks (same lifecycle-instance
+  capability gap as finding 4).
+- **Delivery to the subscribed JS capsule never happens** — the interceptor's
+  entry log never appears (0 of N pings), while the Rust-SDK capsule-cli
+  demonstrably receives its subscribed topics on the same kernel.
+
+Also worth an SDK docs note (hit while building the probe): a fresh
+`npm i @unicity-astrid/{sdk,build}@0.1.0` project does NOT build — the build
+tool resolves the SDK runtime at `node_modules/@unicity-astrid/astrid-sdk`
+and the canonical WIT at `node_modules/contracts/host`, neither of which npm
+creates. Required manual aliasing: link/junction `@unicity-astrid/astrid-sdk`
+→ `@unicity-astrid/sdk` (MUST be a link, not a copy — a copy makes esbuild
+bundle two SDK instances and the decorator registry splits, yielding
+"No @capsule class registered"), and copy `@unicity-astrid/contracts` →
+`node_modules/contracts`.
+
 ### Sub-observation: a returned `@run` is treated as a crash
 
 An experiment returning from `@run` right after `runtime.signalReady()`

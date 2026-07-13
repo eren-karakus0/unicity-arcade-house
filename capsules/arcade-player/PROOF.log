@@ -112,3 +112,25 @@
 # key therefore rides in the LOCALLY-BUILT wasm (gen-local-key.mjs, gitignored;
 # target/ never committed), with runtime config tried first so newer kernels
 # take over automatically. Full write-up: patches/UPSTREAM.md finding 4.
+
+# ============================================================================
+# BOT LEAGUE (captured 2026-07-13, astrid 0.9.4) — P1.T2
+#
+# Capsule-to-capsule IPC composition is upstream-blocked, with the probe to
+# prove it (capsules/league-pinger): a JS capsule CAN publish from its @run
+# instance — "[pinger] published arcade.v1.league.ping (daemon)" — but the
+# subscribed JS capsule's interceptor NEVER fires (0 deliveries), and the
+# lifecycle instance cannot even publish. UPSTREAM.md finding 3, now airtight.
+#
+# So the league lives inside ONE capsule: three strategist personas, each with
+# its own arcade identity, risk appetite and leaderboard row:
+
+2026-07-13T09:33:03.091770Z  INFO ...host::sys: [floor] house=@alphascout-knkchn jackpot=100 UCT — the league walks in plugin=arcade-player
+2026-07-13T09:33:14.568981Z  INFO ...host::sys: [league] astrid-capsule (llm): play coin bet=2 — With only one round left and a minor loss in the first, a moderate bet on a 50/50 coin flip offers a balanced chance to  plugin=arcade-player
+2026-07-13T09:33:16.309588Z  INFO ...host::sys: [league] astrid-capsule session: 2 rounds, 0 wins, net -3 UCT, balance 64, strategist=llm, fair=true plugin=arcade-player
+2026-07-13T09:33:23.740715Z  INFO ...host::sys: [league] astrid-daredevil session: 2 rounds, 2 wins, net +2 UCT, balance 8, strategist=entropy, fair=true plugin=arcade-player
+2026-07-13T09:33:29.037291Z  INFO ...host::sys: [league] astrid-steady session: 2 rounds, 0 wins, net -2 UCT, balance 3, strategist=entropy, fair=true plugin=arcade-player
+2026-07-13T09:33:29.988781Z  INFO ...host::sys: [league] round complete: ["astrid-capsule:-3","astrid-daredevil:2","astrid-steady:-2"] plugin=arcade-player
+
+# (Some moves fall back to the entropy picker when the free-tier LLM quota
+# rate-limits a burst — by design, and visible per-move in the log.)

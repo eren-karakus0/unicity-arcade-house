@@ -1,0 +1,14 @@
+[package]
+name = "league-pinger"
+version = "0.1.0"
+description = "Capsule-to-capsule IPC probe: publishes arcade.v1.league.ping so the arcade-player capsule's interceptor can prove (or disprove) that JS capsules receive bus topics on this kernel."
+authors = ["eren-karakus0"]
+astrid-version = ">=0.5.0"
+
+[[component]]
+id = "league-pinger"
+file = "league-pinger.wasm"
+type = "executable"
+
+[publish]
+"arcade.v1.league.ping" = { wit = "opaque" }

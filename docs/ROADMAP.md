@@ -24,9 +24,13 @@ its own SHA-256. This track polishes it, upgrades it, and makes it visible.
   `fair=true` (PROOF.log). Key rides in the locally-built wasm because the
   kernel's config surface returns none to JS capsules (UPSTREAM.md finding 4);
   runtime config is tried first so a fixed kernel takes over automatically.
-- [ ] **P1.T2 — Multi-capsule composition**
-  Strategist ↔ player capsules talking over the IPC bus, and/or a small
-  "bot league" of strategy variants racing on the leaderboard.
+- [x] **P1.T2 — Multi-capsule composition → bot league** *(shipped 2026-07-13)*
+  Cross-capsule IPC is upstream-blocked and now precisely proved by a probe
+  capsule (`league-pinger`: JS publish works from `@run`, delivery to a
+  subscribed JS capsule never fires — UPSTREAM.md finding 3 addendum). Pivoted
+  to the **bot league**: three strategist personas (balanced / aggressive /
+  cautious), each with its own arcade identity, LLM risk appetite and
+  leaderboard row; live standings on the arcade page.
 - [ ] **P1.T3 — Bazaar bridge (capsule delivery channel)**
   List an Astrid-hosted agent on Unicity Agent Bazaar via the `capsule`
   channel and prove one end-to-end hire — Arcade + Bazaar + Astrid OS in a
