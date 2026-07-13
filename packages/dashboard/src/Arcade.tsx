@@ -104,6 +104,10 @@ export function Arcade() {
   const settleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dealing = useRef(false);
   const hold = suspense || settling;
+  // Auto-bet: repeat the LAST move for N rounds (respects the house cooldown;
+  // stops on empty balance, an error, or switching game).
+  const [auto, setAuto] = useState<number | null>(null);
+  const autoChoice = useRef<{ choice: unknown; withSeed?: boolean } | null>(null);
 
   useEffect(
     () => () => {
@@ -380,10 +384,41 @@ export function Arcade() {
     if (connected && ready && !round && !result) void deal(selected);
   }, [connected, ready, round, result, selected, deal]);
 
+  // Auto-bet engine: when a run is active, clear the finished round, then
+  // replay the remembered move on the fresh one — paced above the house's
+  // per-address cooldown, ended by zero rounds left or an empty balance.
+  useEffect(() => {
+    if (auto == null || status !== 'idle' || hold) return;
+    if (auto <= 0) {
+      setAuto(null);
+      return;
+    }
+    if (result && !round) {
+      const t = setTimeout(() => again(), 1000);
+      return () => clearTimeout(t);
+    }
+    if (round && !result && autoChoice.current) {
+      if ((you?.chips ?? 0) < bet) {
+        setAuto(null);
+        return;
+      }
+      const move = autoChoice.current;
+      const t = setTimeout(() => {
+        setAuto((a) => (a != null ? a - 1 : null));
+        void play(move.choice, move.withSeed);
+      }, 400);
+      return () => clearTimeout(t);
+    }
+    // NOTE: play/again are re-created per render but only read from stable
+    // state — deliberately excluded from the deps of this state machine.
+  }, [auto, status, hold, result, round, bet, you]);
+
   const selectGame = (id: string) => {
     if (id === selected) return;
     sfx.click();
     setSelected(id);
+    setAuto(null);
+    autoChoice.current = null; // a move from one game is meaningless in another
     setRound(null);
     setResult(null);
     setVerified(null);
@@ -406,6 +441,8 @@ export function Arcade() {
       withSeed && choice && typeof choice === 'object'
         ? { ...(choice as Record<string, unknown>), seed: getClientSeed() }
         : choice;
+    // Remember the pre-seed move so auto-bet can replay it.
+    autoChoice.current = { choice, ...(withSeed ? { withSeed } : {}) };
     try {
       const res = await playRound({
         game: selected,
@@ -432,6 +469,21 @@ export function Arcade() {
             detail: `+${res.referral!.welcomeBonus} UCT for joining via a friend`,
             icon: 'spark',
             reward: res.referral!.welcomeBonus,
+            unlocked: true,
+          },
+        ]);
+        sfx.win();
+      }
+      if (res.levelUp) {
+        // Tier climb — celebrate like an achievement (crown + bonus chips).
+        setAchQueue((q) => [
+          ...q,
+          {
+            id: `tier-${res.levelUp!.tier}`,
+            title: `${res.levelUp!.tier.toUpperCase()} TIER`,
+            detail: `+${res.levelUp!.bonus} UCT level-up bonus · rakeback now ${res.progress?.rakebackPct ?? '?'}%`,
+            icon: 'crown',
+            reward: res.levelUp!.bonus,
             unlocked: true,
           },
         ]);
@@ -507,6 +559,7 @@ export function Arcade() {
       refreshBoard();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Play failed.');
+      setAuto(null); // an error ends the auto run
     } finally {
       setStatus('idle');
     }
@@ -752,6 +805,33 @@ export function Arcade() {
                   <span className="betbar__empty">no balance — deposit from your wallet to play</span>
                 ) : (you?.chips ?? 0) < bet ? (
                   <span className="betbar__empty">bet is over your {you?.chips} UCT balance</span>
+                ) : null}
+              </div>
+            )}
+
+            {status !== 'playing' && !hold && (
+              <div className="betbar betbar--auto">
+                <span className="betbar__label">auto</span>
+                {[5, 10, 25].map((n) => (
+                  <button
+                    key={n}
+                    className="betbtn"
+                    onClick={() => {
+                      sfx.bet();
+                      setAuto(n);
+                    }}
+                    disabled={!autoChoice.current || auto != null || (you?.chips ?? 0) < bet}
+                    title="repeat your last move automatically"
+                  >
+                    ×{n}
+                  </button>
+                ))}
+                {auto != null ? (
+                  <button className="betbtn betbtn--on" onClick={() => setAuto(null)}>
+                    stop · {auto} left
+                  </button>
+                ) : !autoChoice.current ? (
+                  <span className="betbar__empty">play one round first — auto repeats your last move</span>
                 ) : null}
               </div>
             )}

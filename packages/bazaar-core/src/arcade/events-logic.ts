@@ -34,6 +34,12 @@ export interface PlayerState {
   referredBy: string | undefined;
   /** How many new players this player has referred. */
   referrals: number;
+  /** Lifetime XP (log-scaled from wagers — see xpForBet). */
+  xp?: number;
+  /** Highest tier index already granted (level-up bonuses never repeat). */
+  tierIdx?: number;
+  /** Rakeback accrual in milli-chips (credited as whole chips when >= 1000). */
+  rakeMilli?: number;
 }
 
 export const DAILY_GOAL = 5;
@@ -133,4 +139,105 @@ export interface DailyView {
 export function dailyView(state: PlayerState, day: string): DailyView {
   if (state.dailyDay !== day) return { goal: DAILY_GOAL, wins: 0, claimed: false };
   return { goal: DAILY_GOAL, wins: state.dailyWins, claimed: state.dailyClaimed };
+}
+
+// ---------------------------------------------------------------------------
+// XP, tiers & rakeback — the retention spine. XP is LOG-scaled from the wager
+// (bets stay uncapped by design, but a whale can't buy the ladder in one hand),
+// tiers unlock a rakeback rate (a slice of every LOST bet comes back as chips,
+// accrued in milli-chips so small bets still count) plus a one-time level-up
+// bonus. Pure + bounded: three small numbers per player.
+// ---------------------------------------------------------------------------
+
+export interface TierDef {
+  name: string;
+  minXp: number;
+  /** Rakeback in per-mille of a lost bet (20 = 2%). */
+  rakebackMilli: number;
+  /** One-time chips bonus when the tier is first reached. */
+  bonus: number;
+}
+
+export const TIERS: readonly TierDef[] = [
+  { name: 'Bronze', minXp: 0, rakebackMilli: 20, bonus: 0 },
+  { name: 'Silver', minXp: 1_000, rakebackMilli: 40, bonus: 25 },
+  { name: 'Gold', minXp: 5_000, rakebackMilli: 60, bonus: 100 },
+  { name: 'Platinum', minXp: 20_000, rakebackMilli: 80, bonus: 250 },
+  { name: 'Diamond', minXp: 75_000, rakebackMilli: 100, bonus: 500 },
+] as const;
+
+/** XP for one round: 10·log₂(1+bet), rounded — bet 1 → 10, 10 → 35, 1000 → 100. */
+export function xpForBet(bet: number): number {
+  return Math.round(10 * Math.log2(1 + Math.max(0, bet)));
+}
+
+export function tierIndexFor(xp: number): number {
+  let idx = 0;
+  for (let i = 0; i < TIERS.length; i++) if (xp >= TIERS[i]!.minXp) idx = i;
+  return idx;
+}
+
+export interface ProgressUpdate {
+  state: PlayerState;
+  xpGained: number;
+  /** Whole chips credited from rakeback accrual this round. */
+  rakeCredited: number;
+  /** Set when this round crossed one or more tier boundaries. */
+  levelUp: { tier: string; bonus: number } | null;
+}
+
+/**
+ * Apply one round's XP + rakeback + (possible) level-up to the player.
+ * Rakeback accrues on LOSSES at the player's CURRENT tier rate; level-up
+ * bonuses are granted once per tier, even across multi-tier jumps.
+ */
+export function applyProgress(prev: PlayerState, bet: number, outcome: 'win' | 'lose' | 'tie'): ProgressUpdate {
+  const xpGained = xpForBet(bet);
+  const xp = (prev.xp ?? 0) + xpGained;
+  const grantedIdx = prev.tierIdx ?? 0;
+  let rakeMilli = prev.rakeMilli ?? 0;
+  let rakeCredited = 0;
+  if (outcome === 'lose') {
+    rakeMilli += bet * TIERS[Math.min(grantedIdx, TIERS.length - 1)]!.rakebackMilli;
+    rakeCredited = Math.floor(rakeMilli / 1000);
+    rakeMilli -= rakeCredited * 1000;
+  }
+  const reachedIdx = tierIndexFor(xp);
+  let tierIdx = grantedIdx;
+  let levelUp: ProgressUpdate['levelUp'] = null;
+  let bonus = 0;
+  if (reachedIdx > grantedIdx) {
+    for (let i = grantedIdx + 1; i <= reachedIdx; i++) bonus += TIERS[i]!.bonus;
+    tierIdx = reachedIdx;
+    levelUp = { tier: TIERS[reachedIdx]!.name, bonus };
+  }
+  return {
+    state: { ...prev, xp, rakeMilli, tierIdx, chips: prev.chips + rakeCredited + bonus },
+    xpGained,
+    rakeCredited,
+    levelUp,
+  };
+}
+
+export interface ProgressView {
+  xp: number;
+  tier: string;
+  tierIdx: number;
+  /** XP needed for the next tier, or null at the top. */
+  nextTierXp: number | null;
+  /** Current rakeback, percent (e.g. 4 = 4% of lost bets back). */
+  rakebackPct: number;
+}
+
+export function progressView(state: PlayerState): ProgressView {
+  const xp = state.xp ?? 0;
+  const idx = state.tierIdx ?? tierIndexFor(xp);
+  const next = TIERS[idx + 1];
+  return {
+    xp,
+    tier: TIERS[Math.min(idx, TIERS.length - 1)]!.name,
+    tierIdx: idx,
+    nextTierXp: next ? next.minXp : null,
+    rakebackPct: TIERS[Math.min(idx, TIERS.length - 1)]!.rakebackMilli / 10,
+  };
 }

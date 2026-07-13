@@ -4,15 +4,18 @@ import { commitHash, deriveJackpotRoll, makeNonce } from './rng.js';
 import { GAMES, type Outcome } from './games/index.js';
 import {
   applyLoss,
+  applyProgress,
   applyWin,
   dailyView,
   newPlayerState,
+  progressView,
   todayKey,
   welcomeGrant,
   DAILY_GOAL,
   DAILY_REWARD,
   type DailyView,
   type PlayerState,
+  type ProgressView,
 } from './events-logic.js';
 import {
   catalogView,
@@ -128,6 +131,13 @@ export interface PlayResult {
   achievementBonus: number;
   /** Set once, when this round applied a valid referral for a new player. */
   referral?: { welcomeBonus: number };
+  /** Retention spine: XP gained this round + the player's live progress. */
+  xpGained: number;
+  progress: ProgressView;
+  /** Whole chips credited from rakeback accrual this round (losses only). */
+  rakeCredited: number;
+  /** Set when this round crossed a tier boundary (one-time chips bonus). */
+  levelUp?: { tier: string; bonus: number };
 }
 
 /** Background on-chain payout state, pollable per round. */
@@ -173,6 +183,8 @@ export interface PlayerProfile {
   daily: DailyView;
   achievements: AchievementView[];
   referral: { code: string | null; referrals: number; referred: boolean };
+  /** XP, tier, next-tier threshold and live rakeback rate. */
+  progress: ProgressView;
 }
 
 /**
@@ -481,6 +493,9 @@ export class GameDealer {
     const { fresh, unlocked } = newlyUnlocked(statsOf(state), state.unlocked);
     const achievementBonus = fresh.reduce((sum, a) => sum + a.reward, 0);
     state = { ...state, unlocked, chips: state.chips + achievementBonus };
+    // Retention spine: XP (log-scaled), tier rakeback on losses, level-up bonus.
+    const prog = applyProgress(state, bet, judged.outcome);
+    state = prog.state;
     this.players.set(key, state);
 
     // Tournament: net winnings (payout minus stake) race the current window.
@@ -538,6 +553,10 @@ export class GameDealer {
       achievements,
       achievementBonus,
       ...(referral ? { referral } : {}),
+      xpGained: prog.xpGained,
+      progress: progressView(state),
+      rakeCredited: prog.rakeCredited,
+      ...(prog.levelUp ? { levelUp: prog.levelUp } : {}),
     };
   }
 
@@ -579,6 +598,7 @@ export class GameDealer {
       daily: state ? dailyView(state, day) : { goal: DAILY_GOAL, wins: 0, claimed: false },
       achievements: this.achievementsOf(address),
       referral: this.referralInfo(address),
+      progress: progressView(state ?? newPlayerState()),
     };
   }
 
@@ -597,11 +617,12 @@ export class GameDealer {
    */
   private settleTournament(now: number): void {
     for (const c of this.tourney.maybeRoll(now)) {
-      const id = `tourney-${c.at}`;
+      // Rank in the id: a podium shares one closing timestamp — three prizes.
+      const id = `tourney-${c.at}-r${c.rank}`;
       if (!this.pendingPrizes.has(id)) {
         this.pendingPrizes.set(id, { id, address: c.address, amount: c.prize, name: c.name, at: c.at, tries: 0 });
       }
-      this.log.info(`TOURNAMENT — @${c.name} took the ${c.prize} UCT prize (score ${c.score})`);
+      this.log.info(`TOURNAMENT — @${c.name} placed #${c.rank}: ${c.prize} UCT (score ${c.score})`);
       this.payPrize(this.pendingPrizes.get(id)!);
     }
   }

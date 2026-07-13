@@ -19,16 +19,23 @@ export interface TournamentChampion {
   /** When the window closed (ms). */
   at: number;
   prize: number;
+  /** Podium position (1..3). Absent on entries from before the ladder. */
+  rank?: number;
 }
 
-/** A window that just closed with a payable leader (has a chain address). */
+/** A window that just closed with a payable podium finisher (has an address). */
 export interface ClosedWindow {
   name: string;
   address: string;
   score: number;
   prize: number;
   at: number;
+  /** Podium position (1..3). */
+  rank: number;
 }
+
+/** The prize ladder: the pool splits 60/25/15 across the podium. */
+export const PODIUM_SPLIT = [0.6, 0.25, 0.15] as const;
 
 export interface TournamentView {
   /** When the current window ends (ms since epoch). */
@@ -70,23 +77,31 @@ export class Tournament {
   }
 
   /**
-   * Advance past any elapsed windows. Each closed window crowns its top scorer
-   * (recorded in the champions list) and, if that leader has a chain address,
-   * returns them for the caller to pay. Idempotent: after rolling, `start` is
-   * past `now`, so a second call in the same window returns nothing.
+   * Advance past any elapsed windows. Each closed window crowns its PODIUM —
+   * the top three scorers split the prize pool 60/25/15 (each cut at least 1,
+   * only real scorers place). Every finisher is recorded in the champions
+   * list; the ones with a chain address are returned for the caller to pay.
+   * Idempotent: after rolling, `start` is past `now`, so a second call in the
+   * same window returns nothing.
    */
   maybeRoll(now: number): ClosedWindow[] {
     const closed: ClosedWindow[] = [];
     while (now >= this.start + this.len) {
       const at = this.start + this.len;
-      const leader = this.leader();
-      if (leader && leader.score > 0) {
-        this.champions.unshift({ name: leader.name, score: leader.score, at, prize: this.prize });
-        if (this.champions.length > 10) this.champions.length = 10;
-        if (leader.address) {
-          closed.push({ name: leader.name, address: leader.address, score: leader.score, prize: this.prize, at });
+      const podium = [...this.scores.values()]
+        .filter((s) => s.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, PODIUM_SPLIT.length);
+      // Record ranks 3→1 so champions[0] is always the window's winner.
+      for (let i = podium.length - 1; i >= 0; i--) {
+        const s = podium[i]!;
+        const cut = Math.max(1, Math.round(this.prize * PODIUM_SPLIT[i]!));
+        this.champions.unshift({ name: s.name, score: s.score, at, prize: cut, rank: i + 1 });
+        if (s.address) {
+          closed.push({ name: s.name, address: s.address, score: s.score, prize: cut, at, rank: i + 1 });
         }
       }
+      if (this.champions.length > 12) this.champions.length = 12;
       this.scores.clear();
       this.start = at;
     }
@@ -101,14 +116,6 @@ export class Tournament {
     if (address) cur.address = address;
     cur.score += netWon;
     this.scores.set(key, cur);
-  }
-
-  private leader(): Score | undefined {
-    let best: Score | undefined;
-    for (const s of this.scores.values()) {
-      if (!best || s.score > best.score) best = s;
-    }
-    return best;
   }
 
   standings(limit = 8): TournamentStanding[] {

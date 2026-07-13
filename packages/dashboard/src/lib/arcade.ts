@@ -88,6 +88,11 @@ export interface PlayResult {
   achievementBonus?: number;
   /** Set once, when this round applied a valid referral for a new player. */
   referral?: { welcomeBonus: number };
+  /** Retention spine: XP this round + live tier/rakeback progress. */
+  xpGained?: number;
+  progress?: ProgressView;
+  rakeCredited?: number;
+  levelUp?: { tier: string; bonus: number };
 }
 
 export interface LeaderRow {
@@ -247,6 +252,14 @@ export interface ReferralInfo {
   referred: boolean;
 }
 
+export interface ProgressView {
+  xp: number;
+  tier: string;
+  tierIdx: number;
+  nextTierXp: number | null;
+  rakebackPct: number;
+}
+
 export interface PlayerProfile {
   balanceUct: number;
   streak: number;
@@ -261,6 +274,7 @@ export interface PlayerProfile {
   daily: DailyView;
   achievements: AchievementView[];
   referral: ReferralInfo;
+  progress: ProgressView;
 }
 
 /** A player's consolidated profile (stats + achievements + invite). */

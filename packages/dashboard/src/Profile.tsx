@@ -65,6 +65,7 @@ export function Profile() {
             </div>
           </header>
 
+          <TierCard p={profile} />
           <StatGrid p={profile} />
 
           {!hasBackend() ? null : (
@@ -76,6 +77,39 @@ export function Profile() {
         </>
       )}
     </section>
+  );
+}
+
+/** Tier + XP progress + live rakeback — the retention ladder, visible. */
+function TierCard({ p }: { p: PlayerProfile | null }) {
+  const prog = p?.progress;
+  if (!prog) return null;
+  const pct =
+    prog.nextTierXp == null
+      ? 100
+      : Math.min(100, Math.round((prog.xp / prog.nextTierXp) * 100));
+  return (
+    <div className={`tiercard tiercard--${prog.tier.toLowerCase()}`}>
+      <div className="tiercard__head">
+        <span className="tiercard__badge">{prog.tier.toUpperCase()}</span>
+        <span className="tiercard__rake" title="a slice of every lost bet comes back as chips">
+          {prog.rakebackPct}% rakeback
+        </span>
+      </div>
+      <div className="tiercard__bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <span className="tiercard__fill" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="tiercard__meta">
+        {prog.nextTierXp == null ? (
+          <span>{prog.xp.toLocaleString()} XP — top of the ladder</span>
+        ) : (
+          <span>
+            {prog.xp.toLocaleString()} / {prog.nextTierXp.toLocaleString()} XP to the next tier
+          </span>
+        )}
+        <span className="tiercard__hint">XP grows with every round — bigger bets count logarithmically</span>
+      </div>
+    </div>
   );
 }
 

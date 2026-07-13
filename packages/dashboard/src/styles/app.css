@@ -2580,3 +2580,57 @@
   font-variant-numeric: tabular-nums;
 }
 .fairsolv__v em { font-style: normal; font-size: 0.7em; color: var(--text-muted); }
+
+/* ===== P2.T3: tier card + auto bar ===== */
+.tiercard {
+  margin: 18px 0;
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-lg, 14px);
+  padding: 16px 18px;
+  background: linear-gradient(180deg, rgba(255, 111, 0, 0.05), transparent 70%);
+}
+.tiercard__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tiercard__badge {
+  font-family: var(--font-display, inherit);
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+.tiercard--silver .tiercard__badge { color: #c9d1d9; }
+.tiercard--gold .tiercard__badge { color: #f5c542; }
+.tiercard--platinum .tiercard__badge { color: #9be8ff; }
+.tiercard--diamond .tiercard__badge { color: #7ef0d4; }
+.tiercard__rake {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-focus);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.tiercard__bar {
+  margin-top: 12px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+.tiercard__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), #ffb066);
+  transition: width 0.5s ease;
+}
+.tiercard__meta {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.tiercard__hint { color: var(--text-muted); }
+.betbar--auto { margin-top: 4px; }

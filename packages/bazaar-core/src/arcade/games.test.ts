@@ -21,6 +21,7 @@ import {
 } from './games/index.js';
 import { deriveCrashPointX100, deriveMines } from './rng.js';
 import { GameDealer } from './game-dealer.js';
+import { applyProgress, newPlayerState, progressView, xpForBet, TIERS } from './events-logic.js';
 import type { SphereAgent } from '../sphere-agent.js';
 
 describe('arcade game registry', () => {
@@ -37,6 +38,49 @@ describe('arcade game registry', () => {
       'rps',
       'wheel',
     ]);
+  });
+});
+
+describe('XP, tiers & rakeback (retention spine)', () => {
+  it('scales XP logarithmically — whales cannot buy the ladder in one hand', () => {
+    expect(xpForBet(1)).toBe(10);
+    expect(xpForBet(10)).toBe(35);
+    expect(xpForBet(1000)).toBe(100);
+    expect(xpForBet(1_000_000)).toBe(199);
+    expect(xpForBet(0)).toBe(0);
+  });
+
+  it('accrues rakeback on losses in milli-chips, crediting whole chips', () => {
+    // Bronze = 2%: a 30-chip loss accrues 600 milli — no credit yet…
+    const s = newPlayerState();
+    let u = applyProgress(s, 30, 'lose');
+    expect(u.rakeCredited).toBe(0);
+    expect(u.state.rakeMilli).toBe(600);
+    // …a second 30-chip loss crosses 1000 milli → 1 chip back.
+    u = applyProgress(u.state, 30, 'lose');
+    expect(u.rakeCredited).toBe(1);
+    expect(u.state.rakeMilli).toBe(200);
+    expect(u.state.chips).toBe(1);
+    // Wins and ties never accrue.
+    expect(applyProgress(u.state, 100, 'win').rakeCredited).toBe(0);
+    expect(applyProgress(u.state, 100, 'tie').rakeCredited).toBe(0);
+  });
+
+  it('grants each tier bonus exactly once, even across a multi-tier jump', () => {
+    const s = { ...newPlayerState(), xp: 999 };
+    // One round jumping straight past Silver (1000) into Gold (5000).
+    const u = applyProgress({ ...s, xp: 4995 }, 2, 'win'); // +16 xp → 5011
+    expect(u.levelUp).toEqual({ tier: 'Gold', bonus: TIERS[1]!.bonus + TIERS[2]!.bonus });
+    expect(u.state.tierIdx).toBe(2);
+    // The next round grants nothing new.
+    expect(applyProgress(u.state, 2, 'win').levelUp).toBeNull();
+  });
+
+  it('progressView reports tier, next threshold and rakeback rate', () => {
+    const v = progressView({ ...newPlayerState(), xp: 1200, tierIdx: 1 });
+    expect(v).toMatchObject({ tier: 'Silver', nextTierXp: 5000, rakebackPct: 4 });
+    const top = progressView({ ...newPlayerState(), xp: 80_000, tierIdx: 4 });
+    expect(top).toMatchObject({ tier: 'Diamond', nextTierXp: null, rakebackPct: 10 });
   });
 });
 
@@ -546,9 +590,10 @@ describe('tournament — dealer wiring', () => {
     // Any dealer touch rolls the window and enqueues the prize payout.
     dealer.newRound('coin', '@t2');
     await dealer.flushPayouts();
-    expect(sent.some((s) => s.memo === 'arcade-tournament' && s.amount === 25)).toBe(true);
+    // Single scorer -> rank-1 cut of the 25 pool: round(25*0.6) = 15.
+    expect(sent.some((s) => s.memo === 'arcade-tournament' && s.amount === 15)).toBe(true);
     const view = dealer.tournamentView();
-    expect(view.champions[0]).toMatchObject({ name: 't2', prize: 25 });
+    expect(view.champions[0]).toMatchObject({ name: 't2', prize: 15, rank: 1 });
     const stats = await dealer.houseStats();
     expect(stats.feed.some((e) => e.kind === 'tournament')).toBe(true);
   });
@@ -586,7 +631,7 @@ describe('tournament — dealer wiring', () => {
     const owed = (await dealer.houseStats()).pendingPrizes;
     expect((await dealer.houseStats()).paidOutUct).toBe(0);
     expect(owed.length).toBeGreaterThanOrEqual(1);
-    expect(owed.some((p) => p.name === 't3' && p.amountUct === 25)).toBe(true);
+    expect(owed.some((p) => p.name === 't3' && p.amountUct === 15)).toBe(true);
     expect(owed.every((p) => p.tries >= 1 && !!p.lastError)).toBe(true);
 
     // The owed prize survives a restart: snapshot → restore into a fresh dealer,
@@ -598,8 +643,8 @@ describe('tournament — dealer wiring', () => {
     rebooted.retryPendingPrizes();
     await rebooted.flushPayouts();
     const after = await rebooted.houseStats();
-    expect(sent.some((s) => s.memo === 'arcade-tournament' && s.amount === 25)).toBe(true);
-    expect(after.paidOutUct).toBeGreaterThanOrEqual(25);
+    expect(sent.some((s) => s.memo === 'arcade-tournament' && s.amount === 15)).toBe(true);
+    expect(after.paidOutUct).toBeGreaterThanOrEqual(15);
     expect(after.pendingPrizes).toHaveLength(0);
   });
 });
