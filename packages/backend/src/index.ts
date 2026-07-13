@@ -8,6 +8,7 @@
  *   GET  /api/arcade/leaderboard                  -> catalog + standings
  *   GET  /api/health                              -> readiness probe
  */
+import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import { loadEnv, SphereAgent, GameDealer, GAME_LIST, createLogger, type DealerSnapshot } from '@bazaar/core';
@@ -16,6 +17,11 @@ import { createSnapshotStore } from './store.js';
 const PORT = Number(process.env.PORT ?? process.env.BACKEND_PORT ?? 4500);
 const env = loadEnv();
 const log = createLogger('backend');
+
+/** League sessions the capsule reported (real strategist reasons) — bounded, since boot. */
+interface AstridSessionLine { game: string; bet: number; outcome: string; reason: string; source: string }
+interface AstridSession { at: number; name: string; style: string; netUct: number; lines: AstridSessionLine[] }
+const astridSessions: AstridSession[] = [];
 
 /** Lightweight game catalog served to the dashboard's game hall. */
 const ARCADE_GAMES = GAME_LIST.map((g) => ({
@@ -227,6 +233,46 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // The capsule reports its league sessions here — REAL strategist reasons
+  // straight from the sandbox (never synthesized), bounded, since-boot.
+  if (pathname === '/api/arcade/astrid/report' && req.method === 'POST') {
+    const expected = process.env.ASTRID_REPORT_SECRET?.trim();
+    const presentedRaw = req.headers['x-astrid-secret'];
+    const presented = Array.isArray(presentedRaw) ? presentedRaw[0] : presentedRaw;
+    const a = Buffer.from(presented ?? '');
+    const b = Buffer.from(expected ?? '');
+    if (!expected || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      json(res, expected ? 401 : 503, { error: expected ? 'bad astrid secret' : 'astrid reporting disabled' });
+      return;
+    }
+    void readJson(req).then((body) => {
+      const sessions = Array.isArray(body.sessions) ? body.sessions : [];
+      for (const s of sessions) {
+        if (!s || typeof s !== 'object') continue;
+        const o = s as Record<string, unknown>;
+        astridSessions.unshift({
+          at: Date.now(),
+          name: String(o.name ?? '').slice(0, 32),
+          style: String(o.style ?? '').slice(0, 64),
+          netUct: Number(o.netUct ?? 0),
+          lines: (Array.isArray(o.lines) ? o.lines : []).slice(0, 8).map((l) => {
+            const r = (l ?? {}) as Record<string, unknown>;
+            return {
+              game: String(r.game ?? '').slice(0, 16),
+              bet: Number(r.bet ?? 0),
+              outcome: String(r.outcome ?? '').slice(0, 8),
+              reason: String(r.reason ?? '').slice(0, 160),
+              source: String(r.source ?? '').slice(0, 8),
+            };
+          }),
+        });
+      }
+      astridSessions.length = Math.min(astridSessions.length, 12);
+      json(res, 200, { accepted: sessions.length });
+    });
+    return;
+  }
+
   // The Astrid OS bot league: a curated view of the capsule personas' REAL
   // traces at this arcade (balances + leaderboard rows — nothing cosmetic),
   // plus the runtime facts the "Autonomous Players" showcase narrates.
@@ -264,6 +310,7 @@ const server = http.createServer((req, res) => {
         'https://github.com/eren-karakus0/unicity-arcade-house/blob/main/capsules/arcade-player/PROOF.log',
       docsUrl: 'https://github.com/eren-karakus0/unicity-arcade-house/blob/main/docs/ASTRID.md',
       machineUrl: 'https://unicityagentbazaar.vercel.app/machine',
+      sessions: astridSessions.slice(0, 12),
     });
     return;
   }

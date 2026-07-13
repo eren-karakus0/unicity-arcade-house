@@ -306,10 +306,28 @@ export interface AstridBot {
   board: LeaderRow | null;
 }
 
+/** One reported league line — a REAL strategist decision from the sandbox. */
+export interface AstridSessionLine {
+  game: string;
+  bet: number;
+  outcome: string;
+  reason: string;
+  source: string;
+}
+export interface AstridSession {
+  at: number;
+  name: string;
+  style: string;
+  netUct: number;
+  lines: AstridSessionLine[];
+}
+
 /** The Astrid OS bot league's real traces + runtime facts. */
 export interface AstridView {
   ready: boolean;
   league?: AstridBot[];
+  /** Recent league sessions the capsule reported (real reasons; since boot). */
+  sessions?: AstridSession[];
   runtime?: { kernel: string; sandbox: string; network: string; strategy?: string; fairness: string };
   proofUrl?: string;
   docsUrl?: string;

@@ -21,7 +21,7 @@ import {
   time,
   runtime,
 } from "@unicity-astrid/sdk";
-import { LOCAL_BAZAAR_SECRET, LOCAL_GEMINI_KEY } from "./local-key.js";
+import { LOCAL_ASTRID_SECRET, LOCAL_BAZAAR_SECRET, LOCAL_GEMINI_KEY } from "./local-key.js";
 
 const BACKEND = "https://sphere-agent-bazaar-backend.onrender.com";
 /** The capsule's arcade identity (its balance key at the house). */
@@ -761,9 +761,27 @@ function walkOntoTheFloor(context: string): void {
     }
     kv.set("league-last", { at: Number(time.nowMs()), context, league });
     log.info(`[league] round complete: ${JSON.stringify(league.map((b) => `${b.name}:${b.netUct}`))}`);
+    reportLeague(league);
   } catch (e) {
     // A hiccup on the floor must never fail the install itself.
     log.warn(`[floor] league round skipped: ${(e as Error).message ?? String(e)}`);
+  }
+}
+
+/**
+ * Post the league round's REAL strategist lines to the arcade backend for the
+ * Autonomous Players showcase (typewriter reads only genuine reasons).
+ * Best-effort: no secret or an unreachable backend just skips, never breaks play.
+ */
+function reportLeague(league: Record<string, unknown>[]): void {
+  if (!LOCAL_ASTRID_SECRET) return;
+  try {
+    const req = http.Request.post(`${BACKEND}/api/arcade/astrid/report`);
+    req.header("x-astrid-secret", LOCAL_ASTRID_SECRET);
+    const res = http.send(req.json({ sessions: league })).json<{ accepted?: number }>();
+    log.info(`[astrid-report] posted ${res.accepted ?? 0} session(s) to the showcase`);
+  } catch (e) {
+    log.warn(`[astrid-report] skipped: ${(e as Error).message ?? String(e)}`);
   }
 }
 
@@ -771,12 +789,21 @@ function walkOntoTheFloor(context: string): void {
 function playPersonaSession(
   p: Persona,
   jackpotUct: number | null,
-): { rounds: number; wins: number; netUct: number; endBalance: number; allFair: boolean; strategist: string } {
+): {
+  rounds: number;
+  wins: number;
+  netUct: number;
+  endBalance: number;
+  allFair: boolean;
+  strategist: string;
+  lines: { game: string; bet: number; outcome: string; reason: string; source: string }[];
+} {
   let balance = get<{ balanceUct: number }>(
     `/api/arcade/balance?address=${encodeURIComponent(p.identity)}`,
   ).balanceUct;
   const rounds: RoundReport[] = [];
   const history: RoundBrief[] = [];
+  const lines: { game: string; bet: number; outcome: string; reason: string; source: string }[] = [];
   let llmUsed = false;
   for (let i = 0; i < p.rounds; i++) {
     const d = decideNext({
@@ -791,9 +818,13 @@ function playPersonaSession(
     log.info(
       `[league] ${p.name} (${d.source}): ${d.stop ? "STOP" : `play ${d.game} bet=${d.bet}`} — ${d.reason}`,
     );
-    if (d.stop) break;
+    if (d.stop) {
+      lines.push({ game: "-", bet: 0, outcome: "stop", reason: d.reason, source: d.source });
+      break;
+    }
     const r = playOne(d.game, Math.min(d.bet, p.maxBet), p.identity, p.name);
     rounds.push(r);
+    lines.push({ game: r.game, bet: r.bet, outcome: r.outcome, reason: d.reason, source: d.source });
     history.push({ game: r.game, bet: r.bet, outcome: r.outcome, rewardUct: r.rewardUct });
     balance = r.balance;
     log.info(
@@ -811,6 +842,7 @@ function playPersonaSession(
     endBalance: rounds[rounds.length - 1]?.balance ?? balance,
     allFair: rounds.every((r) => r.fair.allOk),
     strategist: llmUsed ? "llm" : "entropy",
+    lines,
   };
   log.info(
     `[league] ${p.name} session: ${summary.rounds} rounds, ${summary.wins} wins, net ${net >= 0 ? "+" : ""}${net} UCT, ` +
