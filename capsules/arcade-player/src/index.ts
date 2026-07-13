@@ -21,7 +21,7 @@ import {
   time,
   runtime,
 } from "@unicity-astrid/sdk";
-import { LOCAL_GEMINI_KEY } from "./local-key.js";
+import { LOCAL_BAZAAR_SECRET, LOCAL_GEMINI_KEY } from "./local-key.js";
 
 const BACKEND = "https://sphere-agent-bazaar-backend.onrender.com";
 /** The capsule's arcade identity (its balance key at the house). */
@@ -425,6 +425,84 @@ function decideNext(state: {
 }
 
 /* ------------------------------------------------------------------ */
+/* Bazaar oracle — serving the Agent Bazaar's capsule delivery channel */
+/*                                                                     */
+/* The capsule cannot receive pushes, so the marketplace parks funded  */
+/* jobs in a mailbox and THIS loop polls for them: lease the work, do  */
+/* it for real (play + verify one provably-fair arcade round), post    */
+/* the result back — escrow releases on delivery. Auth: the shared     */
+/* secret baked at build time (env-gated on both sides).               */
+/* ------------------------------------------------------------------ */
+
+const BAZAAR = "https://unicity-agent-bazaar-backend.onrender.com";
+const CAPSULE_REF = "arcade-player";
+const ORACLE_IDENTITY = "@astrid-bazaar-oracle";
+const ORACLE_NAME = "astrid-oracle";
+
+interface BazaarInvocation {
+  jobId: string;
+  input?: unknown;
+  amountUct?: number;
+  escrowRef?: string;
+}
+
+function bazaarHeaders(): { key: string; value: string }[] {
+  return [{ key: "x-capsule-secret", value: LOCAL_BAZAAR_SECRET }];
+}
+
+/** One mailbox sweep: lease parked jobs, play the round, post results. */
+function serveBazaarInbox(): void {
+  if (!LOCAL_BAZAAR_SECRET) return; // channel disabled at build time
+  let jobs: BazaarInvocation[] = [];
+  try {
+    const req = http.Request.get(`${BAZAAR}/api/capsule/inbox?ref=${encodeURIComponent(CAPSULE_REF)}`);
+    for (const h of bazaarHeaders()) req.header(h.key, h.value);
+    jobs = http.send(req).json<{ invocations?: BazaarInvocation[] }>().invocations ?? [];
+  } catch (e) {
+    // The bazaar may be asleep (free tier) - this poll doubles as its wake-up.
+    log.warn(`[oracle] inbox poll failed: ${(e as Error).message ?? String(e)}`);
+    return;
+  }
+  for (const job of jobs) {
+    log.info(`[oracle] leased bazaar job ${job.jobId} (${job.amountUct ?? "?"} UCT escrowed)`);
+    let ok = false;
+    let output: unknown;
+    let error: string | undefined;
+    try {
+      const o = (job.input ?? {}) as Record<string, unknown>;
+      const game = (GAMES as readonly string[]).includes(String(o.game ?? "").toLowerCase())
+        ? (String(o.game).toLowerCase() as GameId)
+        : pick(GAMES);
+      const bet = Math.min(MAX_BET, Math.max(1, Math.floor(Number(o.bet) || 1)));
+      const report = playOne(game, bet, ORACLE_IDENTITY, ORACLE_NAME);
+      ok = report.fair.allOk; // an unfair reveal is a FAILED delivery - by design
+      output = {
+        engine: "unicity-arcade-house via astrid-capsule",
+        ...report,
+        verifiedInSandbox: report.fair.allOk,
+      };
+      if (!ok) error = "fairness verification failed on the reveal";
+      log.info(
+        `[oracle] job ${job.jobId}: ${game} bet=${bet} → ${report.outcome} fair=${report.fair.allOk}`,
+      );
+    } catch (e) {
+      error = (e as Error).message ?? String(e);
+      log.warn(`[oracle] job ${job.jobId} failed: ${error}`);
+    }
+    try {
+      const req = http.Request.post(`${BAZAAR}/api/capsule/result`);
+      for (const h of bazaarHeaders()) req.header(h.key, h.value);
+      const res = http
+        .send(req.json({ jobId: job.jobId, ok, output, ...(error ? { error } : {}) }))
+        .json<{ accepted?: boolean }>();
+      log.info(`[oracle] job ${job.jobId} result posted (accepted=${res.accepted === true})`);
+    } catch (e) {
+      log.warn(`[oracle] result post failed for ${job.jobId}: ${(e as Error).message ?? String(e)}`);
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* The capsule                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -610,21 +688,33 @@ export class ArcadePlayer {
   }
 
   /**
-   * Daemon loop: signal readiness so bus-routed dispatch (tools, CLI verbs)
-   * reaches us. The loop must NOT return — the kernel health-checks the run
-   * loop and treats a return as a crash ("WASM run loop exited unexpectedly"
-   * → restart storm; verified empirically on astrid 0.9.4). Short sleeps keep
-   * the guest parked in a host call rather than burning CPU.
+   * Daemon loop: signal readiness, play the league's opening round, then keep
+   * serving the Agent Bazaar's capsule mailbox forever. The loop must NOT
+   * return — the kernel health-checks the run loop and treats a return as a
+   * crash ("WASM run loop exited unexpectedly" → restart storm; verified
+   * empirically on astrid 0.9.4). Short sleeps keep the guest parked in a
+   * host call rather than burning CPU; the mailbox is polled every ~15s.
    */
   @run
   daemon(): void {
     runtime.signalReady();
-    log.info("arcade-player ready on the floor");
-    // Play a session from the RUNTIME instance too: per-principal env config
-    // (astrid capsule config --set) may only be bound here, not in the
-    // lifecycle instance - so this is where the LLM strategist gets its key.
+    log.info(
+      `arcade-player ready on the floor${LOCAL_BAZAAR_SECRET ? " — serving the bazaar capsule mailbox" : ""}`,
+    );
     walkOntoTheFloor("daemon");
-    for (;;) time.sleepMs(1_000);
+    let tick = 0;
+    for (;;) {
+      time.sleepMs(1_000);
+      tick += 1;
+      if (tick % 15 === 0) {
+        try {
+          serveBazaarInbox();
+        } catch (e) {
+          // The mailbox loop must never kill the daemon.
+          log.warn(`[oracle] sweep crashed: ${(e as Error).message ?? String(e)}`);
+        }
+      }
+    }
   }
 
   @install
