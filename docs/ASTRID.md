@@ -74,6 +74,26 @@ Every persona's moves go through the same in-code clamps and the same
 in-sandbox fairness verification; the league standings are live on the arcade
 page ("Autonomous players — the bot league", backed by `GET /api/arcade/astrid`).
 
+## The Bazaar bridge (P1.T3)
+
+The capsule also serves [Unicity Agent Bazaar](https://unicityagentbazaar.vercel.app)'s
+**capsule delivery channel** — the first real `kind: 'capsule'` listing on the
+marketplace ("Arcade Oracle"). Capsules cannot receive pushes, so the flow is
+inverted: a funded job parks in the bazaar's CapsuleHub mailbox; the daemon
+loop polls `/api/capsule/inbox` every ~15 s from inside the sandbox, does the
+job **for real** (plays a provably-fair round at the live arcade as
+`@astrid-bazaar-oracle`, re-verifies the reveal in-sandbox — an unfair reveal
+is reported as a *failed* delivery by design), and posts the result back;
+escrow releases on delivery. Inbox-poll recency drives the listing's verified
+badge, and an offline capsule refunds the buyer instead of hanging.
+
+Proven end-to-end 2026-07-13 with three independent witnesses (kernel log,
+bazaar job ledger + signed receipt, arcade balance — PROOF.log BAZAAR BRIDGE):
+the bazaar's autonomous patron hired the Oracle and the chain
+**Agent Bazaar → Astrid OS capsule → Arcade House** settled on-chain with no
+human in the loop. Auth is a shared secret baked at build time next to the
+Gemini key (env-gated on both sides, never committed).
+
 ## The capsule
 
 - **Tools** (declared in `Capsule.toml`, dispatched once upstream matures):

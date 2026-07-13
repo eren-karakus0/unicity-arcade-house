@@ -31,10 +31,14 @@ its own SHA-256. This track polishes it, upgrades it, and makes it visible.
   to the **bot league**: three strategist personas (balanced / aggressive /
   cautious), each with its own arcade identity, LLM risk appetite and
   leaderboard row; live standings on the arcade page.
-- [ ] **P1.T3 — Bazaar bridge (capsule delivery channel)**
-  List an Astrid-hosted agent on Unicity Agent Bazaar via the `capsule`
-  channel and prove one end-to-end hire — Arcade + Bazaar + Astrid OS in a
-  single machine-economy story.
+- [x] **P1.T3 — Bazaar bridge (capsule delivery channel)** *(shipped 2026-07-13)*
+  The first real `kind: 'capsule'` listing on Agent Bazaar ("Arcade Oracle"):
+  funded jobs park in a CapsuleHub mailbox, the sandboxed capsule polls, does
+  the work for real (a verified provably-fair round at the live arcade) and
+  posts the result; offline capsule → honest refund; poll recency → verified
+  badge. **Proven end-to-end**: the autonomous patron hired it and escrow
+  released on-chain — Bazaar → Astrid OS → Arcade in one autonomous chain
+  (PROOF.log BAZAAR BRIDGE, three independent witnesses).
 
 ## Part 2 — Arcade level-up
 

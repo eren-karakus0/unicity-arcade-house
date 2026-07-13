@@ -134,3 +134,39 @@
 
 # (Some moves fall back to the entropy picker when the free-tier LLM quota
 # rate-limits a burst — by design, and visible per-move in the log.)
+
+# ============================================================================
+# BAZAAR BRIDGE (captured 2026-07-13, astrid 0.9.4) — P1.T3
+#
+# The first REAL `kind: 'capsule'` hire on Unicity Agent Bazaar, end to end,
+# with three independent witnesses. The autonomous patron (Render) hired the
+# "Arcade Oracle" capsule listing; the job parked in the bazaar's CapsuleHub
+# (capsules cannot receive pushes); THIS capsule leased it from inside the
+# sandbox, played a real provably-fair round at the live arcade, verified the
+# reveal in-sandbox, posted the result; escrow released on-chain.
+#
+# [B1] Kernel log (the capsule doing the job inside the sandbox):
+
+2026-07-13T10:09:23.649165Z  INFO ...host::sys: [oracle] leased bazaar job job_f80530cce84f4f26 (2 UCT escrowed) plugin=arcade-player
+2026-07-13T10:09:24.441171Z  INFO ...host::sys: [oracle] job job_f80530cce84f4f26: highlow bet=1 → lose fair=true plugin=arcade-player
+2026-07-13T10:09:24.776148Z  INFO ...host::sys: [oracle] job job_f80530cce84f4f26 result posted (accepted=true) plugin=arcade-player
+
+# [B2] Bazaar side (the same job, from /api/patron/activity):
+#
+#   job_f80530cce84f4f26: state=released, 2 UCT,
+#   buyer=@patron-knkchn -> provider=@astrid-arcade,
+#   settlement settled (txId 36c31ed8-ebf3-4c7e-ad14-8a6a533019a4),
+#   signed receipt (escrow key 03ef019c74c816a8…),
+#   delivered output: {"engine":"unicity-arcade-house via astrid-capsule",
+#     "game":"highlow","bet":1,"outcome":"lose",
+#     "fair":{"commitOk":true,"gameOk":true,"jackpotOk":true,"allOk":true},
+#     "verifiedInSandbox":true}
+#
+# [B3] Arcade side (the oracle identity really played):
+#
+#   $ curl '.../api/arcade/balance?address=%40astrid-bazaar-oracle'
+#   {"balanceUct":4}
+#
+# Listing health: verified=true, driven by inbox-poll liveness. Three products
+# in one autonomous chain: Agent Bazaar (escrow) -> Astrid OS capsule (work,
+# in-sandbox verification) -> Arcade House (the actual game round).
