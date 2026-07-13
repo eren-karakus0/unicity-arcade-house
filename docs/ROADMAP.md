@@ -52,9 +52,13 @@ verification, VIP/races, live feeds).
   the existing fairness check; the live-payouts ticker now carries notable
   chip wins too. 10 games in the hall; smoke-verified live (real limbo +
   mines rounds judged correctly on deploy).
-- [ ] **P2.T2 — Trust layer**: player-editable client seeds · a `/verify`
-  page that recomputes any past round in the browser · a Fairness & Solvency
-  page (per-game RTP + live treasury).
+- [x] **P2.T2 — Trust layer** *(shipped 2026-07-13)*: the fairness verifier
+  now covers all 10 games with step-by-step math (Limbo/Crash curve, Mines
+  Fisher–Yates re-run) · persistent player-editable client seed (save/rotate,
+  feeds every two-seed round) · **Provably solvent** — live house-wallet
+  panel (treasury, on-chain payouts, rounds, jackpot) beside the odds table.
+  Bonus: clean URLs — `/fairness`, `/profile` (no `#`), SPA rewrite + legacy
+  hash-link upgrade.
 - [ ] **P2.T3 — Retention**: XP/levels with log-scaled progress · tiered
   rakeback · prize-ladder races (60/25/15) on the durable payout rail ·
   auto-bet.
