@@ -238,6 +238,8 @@ export interface AstridView {
   runtime?: { kernel: string; sandbox: string; network: string; strategy?: string; fairness: string };
   proofUrl?: string;
   docsUrl?: string;
+  /** The buyer side of the machine economy — Agent Bazaar's live /machine page. */
+  machineUrl?: string;
 }
 
 /** The Astrid capsule's curated view (Autonomous Players showcase). */

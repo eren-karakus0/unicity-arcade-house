@@ -239,6 +239,9 @@ const server = http.createServer((req, res) => {
       { identity: '@astrid-arcade-capsule', name: 'astrid-capsule', style: 'balanced' },
       { identity: '@astrid-daredevil', name: 'astrid-daredevil', style: 'aggressive' },
       { identity: '@astrid-steady', name: 'astrid-steady', style: 'cautious' },
+      // The machine-economy chain made visible: this one plays ONLY when the
+      // Agent Bazaar's autonomous patron pays it (capsule mailbox, escrowed).
+      { identity: '@astrid-bazaar-oracle', name: 'astrid-oracle', style: 'for-hire' },
     ];
     const rows = dealer.leaderboard(200);
     const league = personas.map((p) => ({
@@ -260,6 +263,7 @@ const server = http.createServer((req, res) => {
       proofUrl:
         'https://github.com/eren-karakus0/unicity-arcade-house/blob/main/capsules/arcade-player/PROOF.log',
       docsUrl: 'https://github.com/eren-karakus0/unicity-arcade-house/blob/main/docs/ASTRID.md',
+      machineUrl: 'https://unicityagentbazaar.vercel.app/machine',
     });
     return;
   }

@@ -66,9 +66,13 @@ verification, VIP/races, live feeds).
   pool now splits 60/25/15 across the top three on the durable payout rail ·
   auto-bet (×5/×10/×25, cooldown-paced, self-stopping) · tier card + XP bar
   on the profile. Smoke-verified live (xpGained math exact on a real round).
-- [ ] **P2.T4 — Unicity moat**: one unified Autonomous Players showcase
-  (Astrid bots + the Bazaar patron) · stretch: async PvP duels, on-chain
-  badges.
+- [x] **P2.T4 — Unicity moat** *(shipped 2026-07-13)*: one unified Autonomous
+  Players showcase — the Astrid bot league now includes the ⛓ **for-hire
+  oracle** (plays only when the Bazaar's autonomous patron pays it through
+  on-chain escrow), with cross-links both ways (arcade → `/machine`, bazaar →
+  the arcade). *Deliberately deferred*: async PvP duels and on-chain
+  achievement badges — real features, but blackjack (P2.T5) is the higher-
+  value next build; both stay on the future list rather than shipping thin.
 - [ ] **P2.T5 — Table games**: a multi-step round engine (same commit-reveal
   guarantees) · **Blackjack vs the house** first · poker vs bots as stretch.
   *Live multiplayer tables are explicitly conditional on an always-on host —

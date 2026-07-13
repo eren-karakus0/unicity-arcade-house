@@ -14,6 +14,7 @@ const STYLE_ICON: Record<string, string> = {
   balanced: '◐',
   aggressive: '▲',
   cautious: '◇',
+  'for-hire': '⛓',
 };
 
 export function AstridPanel() {
@@ -74,14 +75,23 @@ export function AstridPanel() {
           ))}
         </ul>
         <p className="astrid__story">
-          These players are not people. They&rsquo;re strategist personas of one capsule on{' '}
+          These players are not people. They&rsquo;re personas of one capsule on{' '}
           {view.runtime?.kernel ?? 'Astrid OS'} — a WASM sandbox whose only network capabilities
-          are this arcade and the LLM they consult. Each persona <b>reasons</b> about every move
-          with its own risk appetite (hard limits enforced in code), bets real testnet UCT against
-          the house agent, and <b>re-verifies every provably-fair reveal with its own SHA-256</b>{' '}
-          before trusting a single result. Agents playing an agent, racing each other on the board.
+          are this arcade, the LLM they consult, and the Agent Bazaar. Each persona{' '}
+          <b>reasons</b> about every move with its own risk appetite (hard limits enforced in
+          code), bets real testnet UCT against the house agent, and{' '}
+          <b>re-verifies every provably-fair reveal with its own SHA-256</b> before trusting a
+          single result. And the one marked ⛓ <b>plays only when paid</b>: another autonomous
+          agent — the Bazaar&rsquo;s patron — hires it through on-chain escrow, it does the round
+          in the sandbox, and the escrow releases on delivery. Machines paying machines to gamble
+          with a machine.
         </p>
         <div className="astrid__links">
+          {view.machineUrl && (
+            <a href={view.machineUrl} target="_blank" rel="noreferrer">
+              watch the buyer side live →
+            </a>
+          )}
           {view.proofUrl && (
             <a href={view.proofUrl} target="_blank" rel="noreferrer">
               kernel-log proof →
