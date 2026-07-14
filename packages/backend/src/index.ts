@@ -18,10 +18,13 @@ const PORT = Number(process.env.PORT ?? process.env.BACKEND_PORT ?? 4500);
 const env = loadEnv();
 const log = createLogger('backend');
 
-/** League sessions the capsule reported (real strategist reasons) — bounded, since boot. */
+/** League sessions the capsule reported (real strategist reasons) — bounded,
+ *  and persisted so the panel survives the free-tier host's frequent sleeps. */
 interface AstridSessionLine { game: string; bet: number; outcome: string; reason: string; source: string }
 interface AstridSession { at: number; name: string; style: string; netUct: number; lines: AstridSessionLine[] }
 const astridSessions: AstridSession[] = [];
+/** Wired in main() to the durable store; a no-op until then. */
+let persistSessions: () => void = () => {};
 
 /** Lightweight game catalog served to the dashboard's game hall. */
 const ARCADE_GAMES = GAME_LIST.map((g) => ({
@@ -78,6 +81,25 @@ async function boot(): Promise<void> {
     dealerRef.restore(restored);
     log.info(`restored arcade state (${restored.players?.length ?? 0} players)`);
   }
+  // The Astrid showcase sessions live in their own single-row store so they
+  // outlast restarts too (the panel's typewriter would otherwise blank on
+  // every free-tier sleep). Kept separate from the dealer snapshot — it's
+  // showcase data, not game state.
+  const sessionStore = await createSnapshotStore<AstridSession[]>({
+    databaseUrl: process.env.DATABASE_URL,
+    file: path.join(env.dataRoot, 'astrid-sessions.json'),
+    table: 'astrid_sessions',
+    logger: createLogger('persist-astrid'),
+  });
+  const restoredSessions = await sessionStore.load();
+  if (restoredSessions?.length) {
+    astridSessions.push(...restoredSessions.slice(0, 12));
+    log.info(`restored ${astridSessions.length} astrid session(s)`);
+  }
+  persistSessions = () => {
+    void sessionStore.save(astridSessions.slice(0, 12));
+  };
+
   // Pay any tournament prizes that were crowned but never confirmed on-chain
   // before the last shutdown (e.g. the free-tier host slept at the window
   // boundary). The agent is already started, so these settle in the background.
@@ -99,7 +121,9 @@ async function boot(): Promise<void> {
       // land so the final snapshot records them, then persist and exit.
       await dealerRef.flushPayouts();
       await store.save(dealerRef.snapshot());
+      await sessionStore.save(astridSessions.slice(0, 12));
       await store.close();
+      await sessionStore.close();
       process.exit(0);
     })();
   };
@@ -268,6 +292,7 @@ const server = http.createServer((req, res) => {
         });
       }
       astridSessions.length = Math.min(astridSessions.length, 12);
+      persistSessions(); // survive the free-tier host's frequent restarts
       json(res, 200, { accepted: sessions.length });
     });
     return;

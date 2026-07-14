@@ -34,15 +34,23 @@ class FileStore<T> implements SnapshotStore<T> {
   }
 }
 
+// Only our own identifiers reach this (a fixed default or a hard-coded literal),
+// never user input — but validate anyway so the table name can never inject.
+const SAFE_TABLE = /^[a-z_][a-z0-9_]*$/;
+
 class PgStore<T> implements SnapshotStore<T> {
   readonly kind = 'postgres' as const;
   private readonly pool: pg.Pool;
   private readonly ready: Promise<void>;
+  private readonly table: string;
 
   constructor(
     databaseUrl: string,
     private readonly logger?: Logger,
+    table = 'arcade_state',
   ) {
+    if (!SAFE_TABLE.test(table)) throw new Error(`unsafe table name: ${table}`);
+    this.table = table;
     this.pool = new pg.Pool({ connectionString: databaseUrl, max: 4 });
     // A dropped idle connection must not crash the process.
     this.pool.on('error', (err) => this.logger?.warn(`pg pool error: ${err.message}`));
@@ -51,7 +59,7 @@ class PgStore<T> implements SnapshotStore<T> {
 
   private async init(): Promise<void> {
     await this.pool.query(
-      `CREATE TABLE IF NOT EXISTS arcade_state (
+      `CREATE TABLE IF NOT EXISTS ${this.table} (
          id         smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
          data       jsonb NOT NULL,
          updated_at timestamptz NOT NULL DEFAULT now()
@@ -61,7 +69,7 @@ class PgStore<T> implements SnapshotStore<T> {
 
   async load(): Promise<T | null> {
     await this.ready;
-    const res = await this.pool.query<{ data: T }>('SELECT data FROM arcade_state WHERE id = 1');
+    const res = await this.pool.query<{ data: T }>(`SELECT data FROM ${this.table} WHERE id = 1`);
     return res.rows[0]?.data ?? null;
   }
 
@@ -69,7 +77,7 @@ class PgStore<T> implements SnapshotStore<T> {
     try {
       await this.ready;
       await this.pool.query(
-        `INSERT INTO arcade_state (id, data, updated_at) VALUES (1, $1::jsonb, now())
+        `INSERT INTO ${this.table} (id, data, updated_at) VALUES (1, $1::jsonb, now())
          ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
         [JSON.stringify(snapshot)],
       );
@@ -94,9 +102,11 @@ export async function createSnapshotStore<T>(opts: {
   databaseUrl?: string;
   file: string;
   logger?: Logger;
+  /** Postgres table (own single-row store per name). Default 'arcade_state'. */
+  table?: string;
 }): Promise<SnapshotStore<T>> {
   if (opts.databaseUrl) {
-    const store = new PgStore<T>(opts.databaseUrl, opts.logger);
+    const store = new PgStore<T>(opts.databaseUrl, opts.logger, opts.table);
     await store.load(); // eager connect + ensure schema; throws if unreachable
     return store;
   }
