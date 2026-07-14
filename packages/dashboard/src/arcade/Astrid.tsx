@@ -25,7 +25,14 @@ const CAP_LABEL: Record<string, { cap: string; tone: string }> = {
   'for-hire': { cap: 'paid via bazaar', tone: 'hot' },
 };
 
-/** Typewriter over the REAL reported reasons (42ms/char, 5.6s per line). */
+/**
+ * Typewriter over the REAL reported reasons. Completion-driven, not a fixed
+ * rotation: it types the FULL sentence (42ms/char), then holds it fully shown
+ * for a dwell (2.8s) so it can be read, then moves to the next line — long
+ * reasons are never cut off mid-word.
+ */
+const TYPE_MS = 42;
+const DWELL_MS = 2_800;
 function useTypewriter(lines: { who: string; text: string }[]): { who: string; typed: string } | null {
   const [idx, setIdx] = useState(0);
   const [len, setLen] = useState(0);
@@ -47,18 +54,23 @@ function useTypewriter(lines: { who: string; text: string }[]): { who: string; t
     setIdx(0);
     setLen(0);
   }, [lines.length]);
+
+  const full = lines.length ? lines[idx % lines.length]!.text : '';
   useEffect(() => {
     if (lines.length === 0 || reduced) return;
-    const type = setInterval(() => setLen((l) => l + 1), 42);
-    const next = setInterval(() => {
+    if (len < full.length) {
+      // still typing this sentence, one character at a time
+      const t = setTimeout(() => setLen((l) => l + 1), TYPE_MS);
+      return () => clearTimeout(t);
+    }
+    // fully typed — hold it long enough to read, then advance
+    const t = setTimeout(() => {
       setIdx((i) => (i + 1) % lines.length);
       setLen(0);
-    }, 5_600);
-    return () => {
-      clearInterval(type);
-      clearInterval(next);
-    };
-  }, [lines.length, reduced]);
+    }, DWELL_MS);
+    return () => clearTimeout(t);
+  }, [len, full, lines.length, reduced]);
+
   if (lines.length === 0) return null;
   const line = lines[idx % lines.length]!;
   return { who: line.who, typed: reduced ? line.text : line.text.slice(0, len) };
