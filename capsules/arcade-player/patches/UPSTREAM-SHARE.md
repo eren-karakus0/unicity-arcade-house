@@ -10,11 +10,13 @@ and ships with the fix/workaround we actually used.
 
 | # | Title | Severity | Where to file | Status |
 |---|-------|----------|---------------|--------|
-| 1 | Decorator registry read before construction → all lifecycle/tool/run regs empty | Blocker | `unicity-astrid/sdk-js` | **Already filed** — [#20](https://github.com/unicity-astrid/sdk-js/issues/20) / fix PR [#21](https://github.com/unicity-astrid/sdk-js/pull/21) |
-| 2 | Stock JS capsules uninstallable on kernels ≥ 0.9.1 (`astrid:process/host@1.0.0` gone from linker) | Blocker | `unicity-astrid/sdk-js` (+ build) / kernel | New |
-| 3 | JS SDK predates subscribe-driven topic delivery → capsule never receives tool/CLI dispatch | High | `unicity-astrid/sdk-js` | New |
-| 4 | `astrid:sys get-config` returns none to JS capsules for every key (incl. kernel builtins) | High | `unicity-astrid/sdk-js` / kernel | New |
-| A1 | `elliptic ≤ 6.6.1` low advisory ships transitively | Low | `unicitylabs/sphere-sdk` (**different SDK**) | New |
+| 1 | Decorator registry read before construction → all lifecycle/tool/run regs empty | Blocker | `astrid-runtime/sdk-js` | **Filed** — [#20](https://github.com/astrid-runtime/sdk-js/issues/20) / fix PR [#21](https://github.com/astrid-runtime/sdk-js/pull/21) |
+| 2 | Stock JS capsules uninstallable on kernels ≥ 0.9.1 (`astrid:process/host@1.0.0` gone from linker) | Blocker | `astrid-runtime/sdk-js` | **Filed 2026-07-13** — [#23](https://github.com/astrid-runtime/sdk-js/issues/23) |
+| 3 | JS SDK predates subscribe-driven topic delivery → capsule never receives tool/CLI dispatch | High | `astrid-runtime/sdk-js` | **Filed 2026-07-13** — [#25](https://github.com/astrid-runtime/sdk-js/issues/25) |
+| 4 | `astrid:sys get-config` returns none to JS capsules for every key (incl. kernel builtins) | High | `astrid-runtime/sdk-js` | **Filed 2026-07-13** — [#24](https://github.com/astrid-runtime/sdk-js/issues/24) |
+| A1 | `elliptic ≤ 6.6.1` low advisory ships transitively | Low | `@unicitylabs/sphere-sdk` (**different SDK — repo not yet located**) | Pending (see note) |
+
+> **Notes.** The `unicity-astrid/*` repos redirect to **`astrid-runtime/*`** (renamed org) — issues land there. Issues are filed by an external contributor, so **labels are applied by maintainers on triage** (we can't set them). A1's target repo for `@unicitylabs/sphere-sdk` could not be located under a public `unicitylabs` org — file it wherever the Sphere SDK's issues live, or hand it to the Unicity team directly. **Optional next step:** since we have the fixes for #23/#25's install path (`patch-sdk.mjs`), those could follow as PRs — issues first, PRs as a follow-up.
 
 **Common environment** (unless a draft says otherwise): `@unicity-astrid/sdk`
 0.1.0 + `@unicity-astrid/build` 0.1.0 (npm latest, 2026-07-12); astrid **0.9.4**
