@@ -33,6 +33,7 @@ import {
   type RoundSettlement,
 } from './lib/arcade';
 import { saveProof } from './lib/fairness';
+import { motionOverride, setMotionOverride, systemPrefersReduced } from './lib/motion';
 import { AchievementToast } from './arcade/Achievements';
 import { AstridPanel } from './arcade/Astrid';
 import { BlackjackTable } from './arcade/BlackjackTable';
@@ -56,6 +57,13 @@ const nameOf = (id: IdLike): string => {
   if (id.directAddress) return `${id.directAddress.slice(0, 10)}…`;
   return 'anon';
 };
+
+// The server's game list covers one-shot games only — table games (blackjack)
+// are client-mounted surfaces, so keep them when the server list lands.
+const withTableGames = (server: GameMeta[]): GameMeta[] => [
+  ...GAMES_META.filter((m) => m.id === 'blackjack' && !server.some((s) => s.id === m.id)),
+  ...server,
+];
 
 export function Arcade() {
   const wallet = useWalletCtx();
@@ -124,7 +132,7 @@ export function Arcade() {
   const applyBoard = useCallback((b: Awaited<ReturnType<typeof fetchLeaderboard>>) => {
     setBoard(b.rows);
     if (b.house) setHouse(b.house);
-    if (b.games?.length) setGames(b.games);
+    if (b.games?.length) setGames(withTableGames(b.games));
     if (b.daily) setDailyDef(b.daily);
     if (b.deposit) setDepInfo(b.deposit);
     if (b.houseStats) {
@@ -781,6 +789,7 @@ export function Arcade() {
         <ui.Stage
           round={round}
           result={suspense ? null : result}
+          preview={result}
           pending={status === 'playing' || hold}
         />
 
@@ -1192,6 +1201,27 @@ function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 
+/** Shown only when the OS asks for reduced motion: an explicit, per-site
+ *  opt-in that turns the hall's animations back on (players who globally
+ *  disable Windows effects for speed still get to choose the show here). */
+function MotionChip() {
+  const [, force] = useState(0);
+  if (!systemPrefersReduced()) return null;
+  const on = motionOverride();
+  return (
+    <button
+      className={`arcade__chip arcade__chip--motion${on ? ' arcade__chip--motionon' : ''}`}
+      onClick={() => {
+        setMotionOverride(!on);
+        force((n) => n + 1);
+      }}
+      title="Your system prefers reduced motion. This switch turns the hall's animations on anyway — for this site only."
+    >
+      {on ? '✦ animations: on (this site)' : '✦ animations off by your system — turn on'}
+    </button>
+  );
+}
+
 function Hero({ house }: { house: string | null }) {
   return (
     <div className="arcade__hero">
@@ -1208,6 +1238,7 @@ function Hero({ house }: { house: string | null }) {
           provably fair
         </span>
         <span className="arcade__chip">on-chain payouts</span>
+        <MotionChip />
       </div>
     </div>
   );

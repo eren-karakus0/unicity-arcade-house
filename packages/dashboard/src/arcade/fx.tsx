@@ -3,8 +3,9 @@
  * run only while the backend is actually resolving a round, and the win burst
  * plays once after a real on-chain payout result.
  */
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Coin, Die, NumberTile, WheelFace } from './art';
+import { prefersReducedMotion } from '../lib/motion';
 import { sfx } from './sound';
 
 /** A die that cycles faces while the round resolves. */
@@ -184,6 +185,193 @@ export function PlinkoFx({
         <circle r="2.4" cx="-2" cy="-2.4" fill="#FFD9A8" />
       </g>
     </svg>
+  );
+}
+
+/* ---- Crash: the signature flight. The curve is drawn to the REAL, already-
+        committed crash point (fed in during the suspense window), the counter
+        climbs with it, a marker flashes where the player's cash-out clears,
+        and a bust drops the tip off the chart. ---- */
+
+export function CrashFx({
+  flying,
+  crashX100,
+  targetX100,
+}: {
+  flying: boolean;
+  crashX100?: number;
+  targetX100?: number;
+}) {
+  const crash = crashX100 !== undefined ? crashX100 / 100 : undefined;
+  const target = targetX100 !== undefined ? targetX100 / 100 : undefined;
+  const win = crash !== undefined && target !== undefined && crash >= target;
+  const reduced = prefersReducedMotion();
+  const [now, setNow] = useState({ m: 1, p: 0, done: false });
+  const raf = useRef(0);
+
+  const W = 300;
+  const H = 132;
+  const PADX = 10;
+  const PADY = 12;
+  const mMax = crash !== undefined ? Math.max(crash * 1.12, 1.6) : 2;
+  const xOf = (p: number) => PADX + p * (W - 2 * PADX);
+  const yOf = (m: number) =>
+    H - PADY - Math.pow(Math.max(0, m - 1) / (mMax - 1), 0.72) * (H - 2 * PADY);
+  // Short flights bust fast, big multipliers get the full ride.
+  const dur =
+    crash !== undefined
+      ? Math.min(2300, Math.max(650, 600 + 900 * Math.log2(Math.max(crash, 1.01))))
+      : 2300;
+
+  useEffect(() => {
+    cancelAnimationFrame(raf.current);
+    if (crash === undefined) {
+      setNow({ m: 1, p: 0, done: false });
+      return;
+    }
+    if (!flying || reduced) {
+      setNow({ m: crash, p: 1, done: true });
+      return;
+    }
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - t0) / dur);
+      setNow({ m: Math.pow(crash, p), p, done: p >= 1 });
+      if (p < 1) raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf.current);
+  }, [flying, crash, reduced, dur]);
+
+  // Igniting: the round is resolving but the reveal hasn't arrived yet.
+  if (crash === undefined) return <span className="anim-climb crashx">×1.00</span>;
+
+  const K = 28;
+  const pts =
+    now.p > 0
+      ? Array.from({ length: K + 1 }, (_, i) => {
+          const p = (i / K) * now.p;
+          return `${xOf(p).toFixed(1)},${yOf(Math.pow(crash, p)).toFixed(1)}`;
+        }).join(' ')
+      : '';
+  // Where the player's cash-out sits on the flight path (wins only).
+  const pT = win && crash > 1 && target! > 1 ? Math.log(target!) / Math.log(crash) : undefined;
+  const cashed = pT !== undefined && now.p >= pT;
+  const bust = now.done && !win;
+  const tipX = xOf(now.p);
+  const tipY = yOf(now.m);
+
+  return (
+    <div
+      className={`crashfx${bust ? ' crashfx--bust' : ''}${now.done && win ? ' crashfx--win' : ''}`}
+      role="img"
+      aria-label={
+        now.done
+          ? win
+            ? `cashed out at ×${target!.toFixed(2)}, crashed at ×${crash.toFixed(2)}`
+            : `busted at ×${crash.toFixed(2)}`
+          : 'the multiplier is climbing'
+      }
+    >
+      <svg viewBox={`0 0 ${W} ${H}`} className="crashfx__svg" fill="none" aria-hidden>
+        <line x1={PADX} y1={H - PADY} x2={W - PADX} y2={H - PADY} className="crashfx__floor" />
+        {pts && <polyline points={pts} className="crashfx__curve" />}
+        {pT !== undefined && (
+          <g className={`crashfx__cash${cashed ? ' crashfx__cash--hit' : ''}`}>
+            <circle cx={xOf(pT)} cy={yOf(target!)} r="4.5" />
+            {cashed && (
+              <text x={Math.min(xOf(pT) + 9, W - 78)} y={Math.max(yOf(target!) - 8, 12)} className="crashfx__cashlabel">
+                cashed ×{target!.toFixed(2)}
+              </text>
+            )}
+          </g>
+        )}
+        {now.p > 0 && (
+          <g
+            className={`crashfx__tip${bust ? ' crashfx__tip--fall' : ''}`}
+            style={
+              {
+                '--tx': `${tipX.toFixed(1)}px`,
+                '--ty': `${tipY.toFixed(1)}px`,
+                transform: `translate(${tipX.toFixed(1)}px, ${tipY.toFixed(1)}px)`,
+              } as CSSProperties
+            }
+          >
+            <circle r="5" />
+          </g>
+        )}
+      </svg>
+      <div className={`crashfx__num${now.done ? (win ? ' crashfx__num--win' : ' crashfx__num--bust') : ''}`}>
+        ×{now.m.toFixed(2)}
+      </div>
+    </div>
+  );
+}
+
+/* ---- Limbo: the bar. A needle sweeps up the (log) scale toward the real
+        revealed multiplier while the counter climbs — clear the target tick
+        and it lands green, fall short and it lands red. ---- */
+
+export function LimboFx({
+  flying,
+  resultX100,
+  targetX100,
+}: {
+  flying: boolean;
+  resultX100?: number;
+  targetX100?: number;
+}) {
+  const result = resultX100 !== undefined ? resultX100 / 100 : undefined;
+  const target = targetX100 !== undefined ? targetX100 / 100 : undefined;
+  const reduced = prefersReducedMotion();
+  const [p, setP] = useState(0);
+  const raf = useRef(0);
+
+  useEffect(() => {
+    cancelAnimationFrame(raf.current);
+    if (result === undefined) {
+      setP(0);
+      return;
+    }
+    if (!flying || reduced) {
+      setP(1);
+      return;
+    }
+    const D = 1300;
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      const q = Math.min(1, (t - t0) / D);
+      setP(q);
+      if (q < 1) raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf.current);
+  }, [flying, result, reduced]);
+
+  if (result === undefined || target === undefined)
+    return <span className="anim-climb crashx">×?.??</span>;
+
+  const axisMax = Math.max(target * 1.6, result * 1.15, 3);
+  const frac = (m: number) => Math.log(Math.max(m, 1)) / Math.log(axisMax);
+  const ease = 1 - Math.pow(1 - p, 3);
+  const m = Math.exp(ease * Math.log(result)); // sweeps evenly in log space
+  const done = p >= 1;
+  const win = result >= target;
+
+  return (
+    <div
+      className={`limbofx${done ? (win ? ' limbofx--win' : ' limbofx--bust') : ''}`}
+      role="img"
+      aria-label={done ? `rolled ×${result.toFixed(2)} against your ×${target.toFixed(2)} bar` : 'unsealing'}
+    >
+      <div className="limbofx__num">×{m.toFixed(2)}</div>
+      <div className="limbofx__bar" aria-hidden>
+        <div className="limbofx__fill" style={{ width: `${(frac(m) * 100).toFixed(2)}%` }} />
+        <div className="limbofx__tick" style={{ left: `${(frac(target) * 100).toFixed(2)}%` }}>
+          <span className="limbofx__ticklabel">×{target}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -22,18 +22,39 @@ import { sfx } from './sound';
 /** Our card code (0..51, rank = code % 13, 0=A) → the art Card's 1..13 rank. */
 const artRank = (code: number): number => (code % 13) + 1;
 
-function HandRow({ label, cards, total, hole }: { label: string; cards: number[]; total?: number | string; hole?: boolean }) {
+function HandRow({
+  label,
+  cards,
+  total,
+  hole,
+  dealOffset = 0,
+}: {
+  label: string;
+  cards: number[];
+  total?: number | string;
+  hole?: boolean;
+  /** ms head-start so the two rows interleave like a real deal (P, D, P, D…).
+   *  Cards keep stable keys across steps, so only NEW cards animate in. */
+  dealOffset?: number;
+}) {
   return (
     <div className="bj__hand">
       <span className="bj__handlabel">{label}</span>
       <div className="bj__cards">
         {cards.map((c, i) => (
-          <span className="bj__card anim-pop" key={`${c}-${i}`}>
+          <span
+            className="bj__card bj__card--deal"
+            style={{ animationDelay: `${dealOffset + i * 150}ms` }}
+            key={`${c}-${i}`}
+          >
             <Card rank={artRank(c)} size={72} />
           </span>
         ))}
         {hole && (
-          <span className="bj__card">
+          <span
+            className="bj__card bj__card--deal"
+            style={{ animationDelay: `${dealOffset + cards.length * 150}ms` }}
+          >
             <Card hidden size={72} />
           </span>
         )}
@@ -122,8 +143,14 @@ export function BlackjackTable({
         <>
           {result && hand && (
             <div className="bj__table">
+              {/* fresh subtree on settle — the dealer's whole draw replays staggered */}
               <HandRow label="dealer" cards={hand.dealer ?? []} total={hand.dealerTotal} />
-              <HandRow label="you" cards={hand.player} total={`${hand.playerTotal}${hand.doubled ? ' · doubled' : ''}`} />
+              <HandRow
+                label="you"
+                cards={hand.player}
+                total={`${hand.playerTotal}${hand.doubled ? ' · doubled' : ''}`}
+                dealOffset={75}
+              />
             </div>
           )}
           {result && (
@@ -185,7 +212,7 @@ export function BlackjackTable({
         hand && (
           <>
             <div className="bj__table">
-              <HandRow label="dealer" cards={[hand.dealerUp]} hole />
+              <HandRow label="dealer" cards={[hand.dealerUp]} hole dealOffset={75} />
               <HandRow
                 label="you"
                 cards={hand.player}

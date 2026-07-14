@@ -2308,15 +2308,17 @@
   .fairround__actions { margin-left: 0; width: 100%; }
 }
 
+/* Reduced-motion: honored unless the player flips the in-hall "animations on"
+   switch, which stamps data-motion="on" on <html> (see lib/motion.ts). */
 @media (prefers-reduced-motion: reduce) {
-  .app::after,
-  .hdr::after,
-  .ticker__track,
-  .jpot__bulbs,
-  .jpot__amount,
-  .lockbox__tile,
-  .floorback__wheel,
-  .wallart__piece {
+  :root:not([data-motion='on']) .app::after,
+  :root:not([data-motion='on']) .hdr::after,
+  :root:not([data-motion='on']) .ticker__track,
+  :root:not([data-motion='on']) .jpot__bulbs,
+  :root:not([data-motion='on']) .jpot__amount,
+  :root:not([data-motion='on']) .lockbox__tile,
+  :root:not([data-motion='on']) .floorback__wheel,
+  :root:not([data-motion='on']) .wallart__piece {
     animation: none !important;
   }
   /* .fairstep2/.fairverdict stay animated: they reveal content (start at
@@ -2532,7 +2534,15 @@
   color: var(--text-secondary);
 }
 @media (prefers-reduced-motion: reduce) {
-  .anim-climb, .minecell--hit { animation: none; }
+  :root:not([data-motion='on']) .anim-climb,
+  :root:not([data-motion='on']) .minecell--hit,
+  :root:not([data-motion='on']) .minecell--rev,
+  :root:not([data-motion='on']) .bj__card--deal,
+  :root:not([data-motion='on']) .crashfx__cash--hit circle,
+  :root:not([data-motion='on']) .crashfx__tip--fall,
+  :root:not([data-motion='on']) .crashfx--bust .crashfx__svg {
+    animation: none;
+  }
 }
 @media (max-width: 420px) {
   .minesgrid { grid-template-columns: repeat(5, 38px); }
@@ -2799,8 +2809,177 @@
 .astrid__feed:hover .astrid__feedtrack { animation-play-state: paused; }
 @media (max-width: 560px) { .astrid__personas { grid-template-columns: repeat(2, 1fr); } }
 @media (prefers-reduced-motion: reduce) {
-  .astrid, .astrid__badge, .astrid__badgedot, .astrid__capsdot, .astrid__pcard,
-  .astrid__bot--fresh, .astrid__scan, .astrid__earn, .astrid__cursor, .astrid__feedtrack {
+  :root:not([data-motion='on']) .astrid,
+  :root:not([data-motion='on']) .astrid__badge,
+  :root:not([data-motion='on']) .astrid__badgedot,
+  :root:not([data-motion='on']) .astrid__capsdot,
+  :root:not([data-motion='on']) .astrid__pcard,
+  :root:not([data-motion='on']) .astrid__bot--fresh,
+  :root:not([data-motion='on']) .astrid__scan,
+  :root:not([data-motion='on']) .astrid__earn,
+  :root:not([data-motion='on']) .astrid__cursor,
+  :root:not([data-motion='on']) .astrid__feedtrack {
     animation: none !important;
   }
 }
+
+/* ===== M2: game theater — crash flight, limbo bar, mines wave, bj deal ===== */
+.crashfx {
+  position: relative;
+  width: min(320px, 78vw);
+  min-height: 132px;
+}
+.crashfx__svg { display: block; width: 100%; height: auto; overflow: visible; }
+.crashfx__floor { stroke: rgba(255, 255, 255, 0.14); stroke-width: 1; }
+.crashfx__curve {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 6px rgba(255, 111, 0, 0.55));
+}
+.crashfx--bust .crashfx__curve { stroke: var(--risk-critical, #ff3b30); filter: drop-shadow(0 0 6px rgba(255, 59, 48, 0.5)); }
+.crashfx__tip circle { fill: #ffd9a8; stroke: var(--accent); stroke-width: 2; }
+.crashfx__tip--fall {
+  animation: tipfall 0.7s ease-in both;
+}
+@keyframes tipfall {
+  from { transform: translate(var(--tx), var(--ty)); opacity: 1; }
+  to { transform: translate(calc(var(--tx) + 26px), calc(var(--ty) + 130px)) rotate(0.35turn); opacity: 0; }
+}
+.crashfx__cash circle { fill: none; stroke: var(--risk-low, #3ddc97); stroke-width: 2; opacity: 0.55; }
+.crashfx__cash--hit circle {
+  fill: var(--risk-low, #3ddc97);
+  opacity: 1;
+  animation: cashpop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.4);
+}
+@keyframes cashpop {
+  0% { r: 4.5; }
+  45% { r: 9; }
+  100% { r: 4.5; }
+}
+.crashfx__cashlabel {
+  fill: var(--risk-low, #3ddc97);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.crashfx--bust .crashfx__svg { animation: bustshake 0.45s ease; }
+@keyframes bustshake {
+  0%, 100% { transform: none; }
+  25% { transform: translateX(-5px); }
+  50% { transform: translateX(4px); }
+  75% { transform: translateX(-2px); }
+}
+.crashfx__num {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  font-family: var(--font-display, inherit);
+  font-size: 42px;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 14px rgba(6, 6, 6, 0.85);
+}
+.crashfx__num--win { color: var(--risk-low, #3ddc97); }
+.crashfx__num--bust { color: var(--risk-critical, #ff3b30); }
+
+.limbofx {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: min(320px, 78vw);
+  min-height: 120px;
+  padding-top: 14px;
+}
+.limbofx__num {
+  font-family: var(--font-display, inherit);
+  font-size: 46px;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.limbofx--win .limbofx__num { color: var(--risk-low, #3ddc97); }
+.limbofx--bust .limbofx__num { color: var(--risk-critical, #ff3b30); }
+.limbofx__bar {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.05);
+}
+.limbofx__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 111, 0, 0.35), var(--accent));
+}
+.limbofx--win .limbofx__fill { background: linear-gradient(90deg, rgba(61, 220, 151, 0.35), var(--risk-low, #3ddc97)); }
+.limbofx--bust .limbofx__fill { background: linear-gradient(90deg, rgba(255, 59, 48, 0.3), var(--risk-critical, #ff3b30)); }
+.limbofx__tick {
+  position: absolute;
+  top: -7px;
+  bottom: -7px;
+  width: 2px;
+  background: #f3ece1;
+  opacity: 0.75;
+}
+.limbofx__ticklabel {
+  position: absolute;
+  top: -22px;
+  left: 1px;
+  transform: translateX(-50%);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Mines: the reveal ripples out from the hit mine (or your first pick). */
+.minecell--rev { animation: cellreveal 0.3s cubic-bezier(0.2, 0.8, 0.3, 1.2) both; }
+@keyframes cellreveal {
+  0% { opacity: 0.15; transform: rotateY(85deg) scale(0.75); }
+  100% { opacity: 1; transform: none; }
+}
+.minecell--rev.minecell--hit {
+  animation:
+    cellreveal 0.3s cubic-bezier(0.2, 0.8, 0.3, 1.2) both,
+    mineboom 0.55s ease both;
+}
+@keyframes mineboom {
+  0% { transform: scale(1); }
+  25% { transform: scale(1.35) rotate(-6deg); box-shadow: 0 0 24px rgba(255, 59, 48, 0.85); background: rgba(255, 59, 48, 0.55); }
+  55% { transform: scale(0.94) rotate(4deg); }
+  100% { transform: scale(1); box-shadow: 0 0 0 rgba(255, 59, 48, 0); }
+}
+
+/* Blackjack: cards slide off the shoe one by one; `both` keeps each hidden
+   until its turn in the stagger. */
+.bj__card--deal { display: inline-block; animation: dealin 0.42s cubic-bezier(0.18, 0.8, 0.25, 1.15) both; }
+@keyframes dealin {
+  0% { opacity: 0; transform: translate(26px, -18px) rotateY(80deg) scale(0.9); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* Verdicts rise into place — a content reveal, so it stays on under
+   reduced motion (same call as .fairstep2 above). */
+.outcome { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+
+/* The per-site motion switch (only rendered when the OS prefers reduced). */
+button.arcade__chip--motion {
+  cursor: pointer;
+  font: inherit;
+  background: none;
+  color: var(--text-secondary);
+  border-style: dashed;
+}
+button.arcade__chip--motion:hover { color: var(--accent); border-color: var(--border-focus); }
+button.arcade__chip--motionon { color: var(--accent); border-style: solid; }

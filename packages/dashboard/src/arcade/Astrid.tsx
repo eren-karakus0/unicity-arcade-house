@@ -10,6 +10,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchAstrid, type AstridView } from '../lib/arcade';
+import { prefersReducedMotion } from '../lib/motion';
 
 const STYLE_ICON: Record<string, string> = {
   balanced: '◐',
@@ -28,10 +29,20 @@ const CAP_LABEL: Record<string, { cap: string; tone: string }> = {
 function useTypewriter(lines: { who: string; text: string }[]): { who: string; typed: string } | null {
   const [idx, setIdx] = useState(0);
   const [len, setLen] = useState(0);
-  const reduced = useMemo(
-    () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches,
-    [],
-  );
+  // Track the OS preference LIVE (plus the per-site override) — flipping the
+  // system animation setting mid-visit starts/stops the typing right away.
+  const [reduced, setReduced] = useState(prefersReducedMotion);
+  useEffect(() => {
+    if (typeof matchMedia === 'undefined') return;
+    const mq = matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => setReduced(prefersReducedMotion());
+    mq.addEventListener('change', sync);
+    window.addEventListener('arcade:motion', sync);
+    return () => {
+      mq.removeEventListener('change', sync);
+      window.removeEventListener('arcade:motion', sync);
+    };
+  }, []);
   useEffect(() => {
     setIdx(0);
     setLen(0);

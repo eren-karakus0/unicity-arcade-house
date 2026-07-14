@@ -14,7 +14,7 @@ import {
   PlinkoMark,
   WheelFace,
 } from './art';
-import { CyclingTile, PlinkoFx, TumblingDie, WheelFx } from './fx';
+import { CrashFx, CyclingTile, LimboFx, PlinkoFx, TumblingDie, WheelFx } from './fx';
 
 export const GAMES_META: GameMeta[] = [
   { id: 'blackjack', title: 'Blackjack', blurb: 'Hit, stand, double — against a shoe sealed before the first card.', rewardMult: 2, inputKind: 'choice' },
@@ -44,6 +44,9 @@ interface StageProps {
   round: NewRound | null;
   result: PlayResult | null;
   pending: boolean;
+  /** The settled result during the suspense window too (result is hidden then)
+   *  — lets Crash/Limbo animate toward the REAL revealed value. */
+  preview?: PlayResult | null;
 }
 
 export interface GameUI {
@@ -92,29 +95,36 @@ const num = (v: unknown) => Number(v);
 const str = (v: unknown) => (v == null ? undefined : String(v));
 const x = (x100: unknown) => (Number(x100) / 100).toFixed(2);
 
-/* ---- new-game glyphs (inline SVG, brand-orange friendly) ---- */
+/* ---- new-game glyphs (inline SVG, explicit brand palette — these render on
+        the picker cards where currentColor would fall back to plain white) ---- */
+const G_O = '#FF6F00';
+const G_SOFT = '#FFD9A8';
 const RocketMark = ({ size = 24 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-    <path d="M12 2c3.5 2 5 6 4.4 9.6l2.1 2.7-3.2.6-1.6 3.1-2-2.6-3.4.4 1-3.1-2.6-2C5.6 7.4 8.5 3.6 12 2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-    <circle cx="12.6" cy="8.4" r="1.5" fill="currentColor" />
-    <path d="M6.5 17.5 4 20m4.5-.5L7 21.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    <path d="M12 2c3.5 2 5 6 4.4 9.6l2.1 2.7-3.2.6-1.6 3.1-2-2.6-3.4.4 1-3.1-2.6-2C5.6 7.4 8.5 3.6 12 2Z" stroke={G_O} strokeWidth="1.6" strokeLinejoin="round" />
+    <circle cx="12.6" cy="8.4" r="1.5" fill={G_SOFT} />
+    <path d="M6.5 17.5 4 20m4.5-.5L7 21.5" stroke={G_SOFT} strokeWidth="1.6" strokeLinecap="round" />
   </svg>
 );
 const LimboMark = ({ size = 24 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-    <path d="M5 15 12 8l7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M5 20h14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity=".5" />
+    <path d="M5 15 12 8l7 7" stroke={G_O} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M5 20h14" stroke={G_SOFT} strokeWidth="1.4" strokeLinecap="round" opacity=".6" />
   </svg>
 );
 const MinesMark = ({ size = 24 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-    <rect x="3.5" y="3.5" width="17" height="17" rx="2.5" stroke="currentColor" strokeWidth="1.5" />
-    <path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17" stroke="currentColor" strokeWidth="1" opacity=".45" />
-    <circle cx="12" cy="12" r="1.9" fill="currentColor" />
+    <rect x="3.5" y="3.5" width="17" height="17" rx="2.5" stroke={G_O} strokeWidth="1.5" />
+    <path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17" stroke={G_SOFT} strokeWidth="1" opacity=".5" />
+    <circle cx="12" cy="12" r="1.9" fill={G_O} />
   </svg>
 );
 
 /* ---- shared Mines board (picker + reveal) ---- */
+/** Chebyshev distance between two cells on the 5×5 board — drives the wave. */
+const cellDist = (a: number, b: number) =>
+  Math.max(Math.abs((a % 5) - (b % 5)), Math.abs(Math.floor(a / 5) - Math.floor(b / 5)));
+
 function MinesBoard({
   cells = 25,
   selected,
@@ -131,22 +141,32 @@ function MinesBoard({
   const mineSet = new Set(mines ?? []);
   const hitSet = new Set(hit ?? []);
   const revealed = mines !== undefined;
+  // The reveal ripples out from the mine you hit — or your first pick when
+  // the board comes up clean.
+  const epicenter = revealed ? (hit?.[0] ?? [...selected].sort((a, b) => a - b)[0] ?? 12) : undefined;
   return (
     <div className="minesgrid" role="group" aria-label="mines board">
       {Array.from({ length: cells }, (_, i) => {
         const isMine = mineSet.has(i);
         const isPick = selected.has(i);
+        const isHit = hitSet.has(i);
         const cls = [
           'minecell',
           isPick ? ' minecell--pick' : '',
           revealed && isMine ? ' minecell--mine' : '',
           revealed && isPick && !isMine ? ' minecell--safe' : '',
-          hitSet.has(i) ? ' minecell--hit' : '',
+          isHit ? ' minecell--hit' : '',
+          revealed ? ' minecell--rev' : '',
         ].join('');
+        const d = epicenter !== undefined ? cellDist(i, epicenter) : 0;
+        const style = revealed
+          ? { animationDelay: isHit ? `${d * 45}ms, ${d * 45 + 300}ms` : `${d * 45}ms` }
+          : undefined;
         return (
           <button
             key={i}
             className={cls}
+            style={style}
             onClick={onToggle ? () => onToggle(i) : undefined}
             disabled={!onToggle}
             aria-label={`cell ${i + 1}${isPick ? ', picked' : ''}${revealed && isMine ? ', mine' : ''}`}
@@ -218,7 +238,7 @@ const SpadeMark = ({ size = 24 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
     <path
       d="M12 3c3.2 3.1 7 5.6 7 9a3.6 3.6 0 0 1-6.2 2.5c.2 1.9.8 3.3 2.2 4.5h-6c1.4-1.2 2-2.6 2.2-4.5A3.6 3.6 0 0 1 5 12c0-3.4 3.8-5.9 7-9Z"
-      fill="currentColor"
+      fill={G_O}
     />
   </svg>
 );
@@ -233,7 +253,8 @@ export const GAME_UI: Record<string, GameUI> = {
   },
   crash: {
     Icon: ({ size }) => <RocketMark size={size} />,
-    Stage: ({ round, result, pending }) => {
+    Stage: ({ round, result, pending, preview }) => {
+      const data = preview ?? result;
       const win = result ? num(result.reveal.crashX100) >= num(result.reveal.targetX100) : false;
       return (
         <Solo
@@ -249,14 +270,12 @@ export const GAME_UI: Record<string, GameUI> = {
                   : ''
           }
         >
-          {pending ? (
-            <span className="anim-climb crashx">×?.??</span>
-          ) : result ? (
-            <Pop>
-              <span className={`crashx ${win ? 'crashx--win' : 'crashx--bust'}`}>
-                ×{x(result.reveal.crashX100)}
-              </span>
-            </Pop>
+          {pending || data ? (
+            <CrashFx
+              flying={pending}
+              crashX100={data ? num(data.reveal.crashX100) : undefined}
+              targetX100={data ? num(data.reveal.targetX100) : undefined}
+            />
           ) : (
             <span className="crashx crashx--idle">
               <RocketMark size={86} />
@@ -266,12 +285,13 @@ export const GAME_UI: Record<string, GameUI> = {
       );
     },
     options: () => TARGET_OPTIONS([1.2, 1.5, 2, 3, 5]),
-    suspenseMs: 1600,
+    suspenseMs: 2600,
     reward: () => 'pays × your cash-out',
   },
   limbo: {
     Icon: ({ size }) => <LimboMark size={size} />,
-    Stage: ({ round, result, pending }) => {
+    Stage: ({ round, result, pending, preview }) => {
+      const data = preview ?? result;
       const win = result ? num(result.reveal.resultX100) >= num(result.reveal.targetX100) : false;
       return (
         <Solo
@@ -287,14 +307,12 @@ export const GAME_UI: Record<string, GameUI> = {
                   : ''
           }
         >
-          {pending ? (
-            <span className="anim-climb crashx">×?.??</span>
-          ) : result ? (
-            <Pop>
-              <span className={`crashx ${win ? 'crashx--win' : 'crashx--bust'}`}>
-                ×{x(result.reveal.resultX100)}
-              </span>
-            </Pop>
+          {pending || data ? (
+            <LimboFx
+              flying={pending}
+              resultX100={data ? num(data.reveal.resultX100) : undefined}
+              targetX100={data ? num(data.reveal.targetX100) : undefined}
+            />
           ) : (
             <span className="crashx crashx--idle">
               <LimboMark size={86} />
@@ -304,7 +322,7 @@ export const GAME_UI: Record<string, GameUI> = {
       );
     },
     options: () => TARGET_OPTIONS([1.5, 2, 3, 5, 10]),
-    suspenseMs: 1200,
+    suspenseMs: 1600,
     reward: () => 'pays × your target',
   },
   mines: {
