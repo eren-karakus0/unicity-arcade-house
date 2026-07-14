@@ -1113,6 +1113,7 @@ function HouseTicker({ feed, games }: { feed: HouseEvent[]; games: GameMeta[] })
         key={`${dup ? 'd' : 'a'}${i}`}
         aria-hidden={dup}
       >
+        {w.kind === 'jackpot' ? '✨ ' : w.kind === 'tournament' ? '🏆 ' : w.kind === 'cashout' ? '⛓ ' : ''}
         <strong>@{w.name}</strong>{' '}
         {w.kind === 'jackpot'
           ? `HIT THE ${w.amountUct} UCT JACKPOT on ${gameTitle(games, w.game)}`
@@ -1270,7 +1271,10 @@ function EventsBar({
     <div className="events">
       <div className="events__chips">
         <div className="events__chips-top">
-          <span className="events__chips-n">{chips ?? '…'}</span>
+          {/* key-remount pops the number whenever the balance moves */}
+          <span className="events__chips-n anim-countpop" key={chips ?? 'none'}>
+            {chips ?? '…'}
+          </span>
           <span className="events__chips-l">UCT</span>
         </div>
         <div className="events__bank">
@@ -1309,7 +1313,9 @@ function EventsBar({
         >
           <Flame size={20 + Math.min(streak, 10) * 1.5} dim={streak === 0} />
         </span>
-        <span className="events__streak-n">{streak > 0 ? `${streak} win streak` : 'no streak yet'}</span>
+        <span className="events__streak-n anim-countpop" key={streak}>
+          {streak > 0 ? `${streak} win streak` : 'no streak yet'}
+        </span>
         {!!you && you.best > 0 && <span className="events__best">best {you.best}</span>}
       </div>
       <div className="events__daily">

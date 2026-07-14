@@ -25,7 +25,10 @@ export function TournamentPanel({ view }: { view: TournamentView | null }) {
   const countdown = useCountdown(view?.endsAt ?? 0);
   if (!view || view.endsAt === 0) return null;
 
-  const champ = view.champions[0];
+  // Champions are winner-first per closed window; entries sharing the newest
+  // `at` are the last window's podium (up to 3, already in rank order).
+  const lastAt = view.champions[0]?.at;
+  const podium = lastAt !== undefined ? view.champions.filter((c) => c.at === lastAt).slice(0, 3) : [];
   return (
     <div className="tourney">
       <div className="tourney__head">
@@ -60,25 +63,42 @@ export function TournamentPanel({ view }: { view: TournamentView | null }) {
         </div>
 
         <div className="tourney__champ">
-          <div className="tourney__subhead">last champion</div>
-          {champ ? (
-            <div className="champ">
-              <span className="champ__crown" aria-hidden="true">
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M4 8 l3.5 3 4.5 -5 4.5 5 3.5 -3 -1.5 10 h-13 Z"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinejoin="round"
-                    fill="currentColor"
-                    fillOpacity="0.18"
-                  />
-                </svg>
-              </span>
-              <span className="champ__who">@{champ.name}</span>
-              <span className="champ__take">
-                won {champ.prize} UCT · scored +{champ.score}
-              </span>
+          <div className="tourney__subhead">
+            {podium.length > 1 ? 'last podium · paid on-chain' : 'last champion'}
+          </div>
+          {podium.length > 0 ? (
+            <div className="podium">
+              {/* visual order silver · gold · bronze, ranks from the data */}
+              {[1, 0, 2]
+                .filter((r) => r < podium.length)
+                .map((r) => {
+                  const c = podium[r]!;
+                  return (
+                    <div className={`podium__col podium__col--r${r + 1}`} key={`${c.at}-${r}`}>
+                      {r === 0 ? (
+                        <span className="podium__crown" aria-hidden="true">
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                            <path
+                              d="M4 8 l3.5 3 4.5 -5 4.5 5 3.5 -3 -1.5 10 h-13 Z"
+                              stroke="currentColor"
+                              strokeWidth="1.7"
+                              strokeLinejoin="round"
+                              fill="currentColor"
+                              fillOpacity="0.18"
+                            />
+                          </svg>
+                        </span>
+                      ) : (
+                        <span className="podium__medal" aria-hidden="true">
+                          {r + 1}
+                        </span>
+                      )}
+                      <span className="podium__name">@{c.name}</span>
+                      <span className="podium__take">+{c.prize} UCT</span>
+                      <span className="podium__block" aria-hidden="true" />
+                    </div>
+                  );
+                })}
             </div>
           ) : (
             <div className="tourney__empty">The first champion will be crowned when this round ends.</div>

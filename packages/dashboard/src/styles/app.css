@@ -2983,3 +2983,113 @@ button.arcade__chip--motion {
 }
 button.arcade__chip--motion:hover { color: var(--accent); border-color: var(--border-focus); }
 button.arcade__chip--motionon { color: var(--accent); border-style: solid; }
+
+/* ===== M3: floor flow — entrance choreography, live counters, podium ===== */
+/* The floor rises into place section by section, once, on mount. */
+.arcade__hero,
+.events,
+.jpot,
+.ticker,
+.picker,
+.table,
+.tourney,
+.arcade__duo,
+.astrid {
+  animation: rise 0.55s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.events { animation-delay: 0.05s; }
+.jpot { animation-delay: 0.1s; }
+.ticker { animation-delay: 0.15s; }
+.picker { animation-delay: 0.2s; }
+.table { animation-delay: 0.26s; }
+.tourney { animation-delay: 0.32s; }
+.arcade__duo { animation-delay: 0.38s; }
+.astrid { animation-delay: 0.44s; }
+
+/* Key-remounted numbers pop when their value moves (balance, streak). */
+.anim-countpop { display: inline-block; animation: countpop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.3); }
+
+/* Live-payout ticker: read one on hover. */
+.ticker:hover .ticker__track { animation-play-state: paused; }
+
+/* Tournament podium — the last window's top three, house-paid on-chain. */
+.podium {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 12px;
+  padding-top: 6px;
+}
+.podium__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 74px;
+  animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.podium__col--r1 { animation-delay: 0.05s; }
+.podium__col--r2 { animation-delay: 0.16s; }
+.podium__col--r3 { animation-delay: 0.24s; }
+.podium__crown { color: var(--accent); line-height: 0; }
+.podium__medal {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.podium__col--r2 .podium__medal { color: #d8d8d8; border: 1px solid rgba(216, 216, 216, 0.6); }
+.podium__col--r3 .podium__medal { color: #c98a4b; border: 1px solid rgba(201, 138, 75, 0.6); }
+.podium__name {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-primary);
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.podium__take {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.podium__block {
+  width: 100%;
+  border-radius: 6px 6px 0 0;
+  border: 1px solid var(--border-focus);
+  border-bottom: none;
+  background: linear-gradient(180deg, rgba(255, 111, 0, 0.28), rgba(255, 111, 0, 0.05));
+}
+.podium__col--r1 .podium__block { height: 64px; box-shadow: 0 0 18px rgba(255, 111, 0, 0.22); }
+.podium__col--r2 .podium__block {
+  height: 44px;
+  border-color: rgba(216, 216, 216, 0.35);
+  background: linear-gradient(180deg, rgba(216, 216, 216, 0.16), rgba(216, 216, 216, 0.03));
+}
+.podium__col--r3 .podium__block {
+  height: 32px;
+  border-color: rgba(201, 138, 75, 0.4);
+  background: linear-gradient(180deg, rgba(201, 138, 75, 0.18), rgba(201, 138, 75, 0.04));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='on']) .arcade__hero,
+  :root:not([data-motion='on']) .events,
+  :root:not([data-motion='on']) .jpot,
+  :root:not([data-motion='on']) .ticker,
+  :root:not([data-motion='on']) .picker,
+  :root:not([data-motion='on']) .table,
+  :root:not([data-motion='on']) .tourney,
+  :root:not([data-motion='on']) .arcade__duo,
+  :root:not([data-motion='on']) .astrid,
+  :root:not([data-motion='on']) .anim-countpop,
+  :root:not([data-motion='on']) .podium__col {
+    animation: none;
+  }
+}
