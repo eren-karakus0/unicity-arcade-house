@@ -104,7 +104,10 @@ export function AstridPanel() {
           .filter((l) => l.source === 'llm' && l.reason && l.reason !== 'entropy pick')
           .map((l) => ({
             who: `@${s.name}`,
-            text: l.outcome === 'stop' ? l.reason : `${l.reason} → played ${l.game} bet=${l.bet}, ${l.outcome}`,
+            text:
+              l.outcome === 'stop' || l.outcome === 'skip'
+                ? l.reason
+                : `${l.reason} → played ${l.game} bet=${l.bet}, ${l.outcome}`,
           })),
       ),
     [sessions],
@@ -117,7 +120,9 @@ export function AstridPanel() {
           what:
             l.outcome === 'stop'
               ? 'stopped the session — bankroll protected'
-              : `played ${l.game} bet=${l.bet} — ${l.outcome}`,
+              : l.outcome === 'skip'
+                ? `sat out ${l.game} — out of chips`
+                : `played ${l.game} bet=${l.bet} — ${l.outcome}`,
         })),
       ),
     [sessions],

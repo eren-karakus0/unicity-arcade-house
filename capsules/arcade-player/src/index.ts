@@ -755,8 +755,14 @@ function walkOntoTheFloor(context: string): void {
     log.info(`[floor] house=@${lb.house ?? "?"} jackpot=${jackpotUct ?? "?"} UCT — the league walks in`);
     const league: Record<string, unknown>[] = [];
     for (const p of PERSONAS) {
-      const summary = playPersonaSession(p, jackpotUct);
-      league.push({ name: p.name, ...summary });
+      // Defence in depth: a persona that throws outright is skipped, not fatal —
+      // the league round and its report proceed with whoever did play.
+      try {
+        const summary = playPersonaSession(p, jackpotUct);
+        league.push({ name: p.name, ...summary });
+      } catch (e) {
+        log.warn(`[league] ${p.name} sat out: ${(e as Error).message ?? String(e)}`);
+      }
       time.sleepMs(950);
     }
     kv.set("league-last", { at: Number(time.nowMs()), context, league });
@@ -822,7 +828,17 @@ function playPersonaSession(
       lines.push({ game: "-", bet: 0, outcome: "stop", reason: d.reason, source: d.source });
       break;
     }
-    const r = playOne(d.game, Math.min(d.bet, p.maxBet), p.identity, p.name);
+    // A play can be refused (e.g. the persona ran dry mid-session). Record the
+    // strategist's reasoning anyway and end the session gracefully — one broke
+    // persona must never sink the whole league round or its showcase report.
+    let r: RoundReport;
+    try {
+      r = playOne(d.game, Math.min(d.bet, p.maxBet), p.identity, p.name);
+    } catch (e) {
+      lines.push({ game: d.game, bet: d.bet, outcome: "skip", reason: d.reason, source: d.source });
+      log.warn(`[league] ${p.name} could not play ${d.game}: ${(e as Error).message ?? String(e)}`);
+      break;
+    }
     rounds.push(r);
     lines.push({ game: r.game, bet: r.bet, outcome: r.outcome, reason: d.reason, source: d.source });
     history.push({ game: r.game, bet: r.bet, outcome: r.outcome, rewardUct: r.rewardUct });
