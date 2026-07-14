@@ -223,3 +223,22 @@ automatically.
 - astrid 0.9.4 (also 0.9.1) release binaries, x86_64-unknown-linux-gnu, WSL2 Ubuntu 24.04
 - @unicity-astrid/sdk 0.1.0 + build 0.1.0 (npm latest as of 2026-07-12), Node 22
 - astrid-capsule-cli 0.2.0 (release asset `astrid-capsule-cli.capsule`)
+
+---
+
+# Appendix — dependency advisory (separate upstream: @unicitylabs/sphere-sdk)
+
+Not an Astrid/sdk-js bug, but surfaced by `pnpm audit --prod` and worth flagging
+to the Unicity team since it ships with the chain SDK both projects depend on.
+
+**Finding A1 — `elliptic ≤ 6.6.1` (GHSA-848j-6mx2-7j84, severity: LOW).** Pulled
+in transitively: `@unicitylabs/sphere-sdk → elliptic`. Advisory is "risky
+cryptographic primitive implementation". It is a transitive dependency, not a
+direct one, so it cannot be resolved in these repos without a Sphere SDK release
+that bumps `elliptic` (or an npm `overrides` pin, which we deliberately avoid so
+the SDK's own vetted version is used). No HIGH/CRITICAL advisories in either
+project. Reproduce: `pnpm audit --prod` in either repo root (2026-07-13).
+
+Both monorepos otherwise pass a full quality + security pass on 2026-07-13:
+sphere-agent-bazaar 112/112 core tests, unicity-agent-bazaar 158/158 tests,
+lint + typecheck clean, no committed secrets (`.env` gitignored in both).
