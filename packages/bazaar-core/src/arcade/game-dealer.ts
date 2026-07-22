@@ -249,7 +249,7 @@ export interface HouseStats {
   jackpotUct: number;
   /** Newest first, capped. */
   feed: HouseEvent[];
-  /** Tournament prizes crowned but awaiting on-chain confirmation (retried on boot). */
+  /** Prizes (tournament crowns + jackpots) owed but awaiting on-chain confirmation (retried on boot). */
   pendingPrizes: { name: string; amountUct: number; tries: number; lastError?: string }[];
 }
 
@@ -263,7 +263,7 @@ export interface HouseStats {
  * never paying at all.
  */
 export interface PendingPrize {
-  /** Stable id = `tourney-<windowCloseMs>`; dedups the crown and every retry. */
+  /** Stable id: `tourney-<closeMs>-r<rank>` or `<roundId>:jackpot`; dedups every retry. */
   id: string;
   address: string;
   amount: number;
@@ -271,6 +271,10 @@ export interface PendingPrize {
   at: number;
   tries: number;
   lastError?: string;
+  /** Settlement memo — defaults to the tournament payout; jackpots use 'arcade-jackpot'. */
+  memo?: string;
+  /** Game id for the feed event (tournament prizes have none). */
+  game?: string;
 }
 
 /**
@@ -292,7 +296,7 @@ export interface DealerSnapshot {
   minted: number;
   feed: HouseEvent[];
   tournament: TournamentSnapshot;
-  /** Tournament prizes owed but not yet confirmed on-chain (retried on boot). */
+  /** Prizes (tournament crowns + jackpots) owed but not yet confirmed on-chain (retried on boot). */
   pendingPrizes: PendingPrize[];
   /** Open multi-step table hands (staked - must survive a restart). */
   tables?: [string, TableRound][];
@@ -550,15 +554,22 @@ export class GameDealer {
     };
     if (jackpot.hit && args.playerAddress) {
       this.log.info(`JACKPOT — @${name} hit the ${jackpot.potUct} UCT pot`);
-      this.enqueueSettlement(
-        `${args.roundId}:jackpot`,
-        args.playerAddress,
-        jackpot.potUct,
-        'arcade-jackpot',
+      // Record the owed jackpot in the durable pending ledger BEFORE the send +
+      // pot reset — exactly like a tournament crown — so a restart mid-payout
+      // re-attempts it on boot instead of silently dropping the win.
+      const jid = `${args.roundId}:jackpot`;
+      this.pendingPrizes.set(jid, {
+        id: jid,
+        address: args.playerAddress,
+        amount: jackpot.potUct,
         name,
-        args.gameId,
-      );
-      this.pot = this.jackpotSeed; // optimistic — restored if the payout fails
+        at: Date.now(),
+        tries: 0,
+        memo: 'arcade-jackpot',
+        game: args.gameId,
+      });
+      this.pot = this.jackpotSeed; // the pot is now durably owed to the hitter, not restored
+      this.payPrize(this.pendingPrizes.get(jid)!);
     } else if (jackpot.hit) {
       jackpot = { ...jackpot, paid: false, error: 'no wallet address to pay' };
     } else {
@@ -858,9 +869,9 @@ export class GameDealer {
       p.id,
       p.address,
       p.amount,
-      'arcade-tournament',
+      p.memo ?? 'arcade-tournament',
       p.name,
-      'tournament',
+      p.game ?? 'tournament',
       (error) => {
         // Keep it pending for the next retry; record why it failed (surfaced in houseStats).
         const cur = this.pendingPrizes.get(p.id);
@@ -1138,13 +1149,9 @@ export class GameDealer {
         const error = e instanceof Error ? e.message : 'payout failed';
         this.settlements.set(key, { status: 'failed', amountUct: amount, error, at: Date.now() });
         this.log.warn(`settlement ${key} failed: ${error}`);
-        // A failed jackpot payout puts the pot back. The hit optimistically reset
-        // the pot to the seed (pot = jackpotSeed), so restore the amount that was
-        // taken (won pot minus seed) rather than the full amount — which would
-        // over-restore by one seed on top of any growth since the hit.
-        if (memo === 'arcade-jackpot') {
-          this.pot = Math.min(this.jackpotCap, this.pot + amount - this.jackpotSeed);
-        }
+        // Jackpots (like tournament prizes) are owed via the durable pending
+        // ledger — a failed send keeps the prize pending for retry (onFail),
+        // and the pot stays reset to the seed. Nothing to restore here.
         onFail?.(error);
       }
       this.pruneSettlements();

@@ -326,7 +326,7 @@ describe('progressive jackpot', () => {
     expect(stats.feed.some((e) => e.kind === 'jackpot')).toBe(true);
   });
 
-  it('restores the pot (not more) when a jackpot payout fails', async () => {
+  it('keeps the jackpot durably pending (pot stays at seed) when the payout fails', async () => {
     const failing = {
       nametag: 'house-test',
       balanceUct: async () => 1000,
@@ -346,10 +346,13 @@ describe('progressive jackpot', () => {
     expect(res.jackpot.hit).toBe(true);
     await dealer.flushPayouts();
     expect(dealer.settlementFor(nr.roundId).jackpot?.status).toBe('failed');
-    // The hit optimistically reset the pot to the seed; a failed payout must put
-    // it back to the pre-hit value (20), not seed + amount (40).
+    // A failed jackpot payout keeps the pot reset to the seed (20) and records
+    // the owed jackpot in the durable pending ledger — retried on boot rather
+    // than lost. It is NOT put back into the pot (that would double-credit a
+    // later successful retry).
     const stats = await dealer.houseStats();
     expect(stats.jackpotUct).toBe(20);
+    expect(stats.pendingPrizes.some((p) => p.amountUct === 20)).toBe(true);
   });
 
   it('rejects bets above the balance (no fixed cap)', async () => {
