@@ -154,8 +154,8 @@ export function AstridPanel() {
           <span className="astrid__title">Autonomous players — the bot league</span>
           <span className="astrid__sub">machine economy · both sides of the table</span>
         </div>
-        <span className="astrid__badge" title="Runs on the Astrid OS WASM microkernel">
-          <span className="astrid__badgedot" aria-hidden />▣ Astrid OS
+        <span className="astrid__badge" title="Runs live on Unicity AOS — the open-source agent operating system">
+          <span className="astrid__badgedot" aria-hidden />▣ Unicity AOS
         </span>
       </div>
 
@@ -233,8 +233,8 @@ export function AstridPanel() {
         )}
 
         <p className="astrid__story">
-          These players are not people. They&rsquo;re personas of one capsule on{' '}
-          {view.runtime?.kernel ?? 'Astrid OS'} — a WASM sandbox whose only network capabilities
+          These players are not people. They&rsquo;re personas of one capsule running live on{' '}
+          {view.runtime?.kernel ?? 'Unicity AOS'} — a WASM sandbox whose only network capabilities
           are the lanes above. Each persona <b>reasons</b> about every move with its own risk
           appetite (hard limits enforced in code), bets real testnet UCT against the house agent,
           and <b>re-verifies every provably-fair reveal with its own SHA-256</b>. The one marked ⛓{' '}

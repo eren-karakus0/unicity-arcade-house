@@ -324,8 +324,8 @@ const server = http.createServer((req, res) => {
       ready: true,
       league,
       runtime: {
-        kernel: 'Astrid OS 0.9.4 (WASM microkernel)',
-        sandbox: 'one wasm32-wasip2 component in a Wasmtime sandbox — a league of strategist personas',
+        kernel: 'Unicity AOS 2026.1.3 · Astrid microkernel 0.10.4 (WASM)',
+        sandbox: 'one wasm32-wasip2 component in a Wasmtime sandbox — a league of strategist personas, live on an always-on Unicity AOS daemon',
         network: 'capability-gated egress: this arcade + its LLM endpoint only',
         strategy:
           'each persona reasons about game/bet/stop with its own risk appetite - hard limits enforced in code, entropy fallback without a key',

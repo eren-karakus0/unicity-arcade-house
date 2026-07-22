@@ -23,7 +23,7 @@ import {
 } from "@unicity-astrid/sdk";
 import { LOCAL_ASTRID_SECRET, LOCAL_BAZAAR_SECRET, LOCAL_GEMINI_KEY } from "./local-key.js";
 
-const BACKEND = "https://sphere-agent-bazaar-backend.onrender.com";
+const BACKEND = "https://arcade.92-5-91-131.sslip.io";
 /** The capsule's arcade identity (its balance key at the house). */
 const IDENTITY = "@astrid-arcade-capsule";
 const NAME = "astrid-capsule";
@@ -434,7 +434,7 @@ function decideNext(state: {
 /* secret baked at build time (env-gated on both sides).               */
 /* ------------------------------------------------------------------ */
 
-const BAZAAR = "https://unicity-agent-bazaar-backend.onrender.com";
+const BAZAAR = "https://bazaar.92-5-91-131.sslip.io";
 const CAPSULE_REF = "arcade-player";
 const ORACLE_IDENTITY = "@astrid-bazaar-oracle";
 const ORACLE_NAME = "astrid-oracle";

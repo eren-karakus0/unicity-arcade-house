@@ -17,12 +17,12 @@ kv = ["*"]
 # strategist consults, and the Agent Bazaar whose capsule mailbox it serves.
 # Nothing else is reachable from the sandbox.
 net = [
-  "sphere-agent-bazaar-backend.onrender.com",
-  "sphere-agent-bazaar-backend.onrender.com:443",
+  "arcade.92-5-91-131.sslip.io",
+  "arcade.92-5-91-131.sslip.io:443",
   "generativelanguage.googleapis.com",
   "generativelanguage.googleapis.com:443",
-  "unicity-agent-bazaar-backend.onrender.com",
-  "unicity-agent-bazaar-backend.onrender.com:443",
+  "bazaar.92-5-91-131.sslip.io",
+  "bazaar.92-5-91-131.sslip.io:443",
 ]
 
 # Current manifest schema (kernels >= 0.9.x, see capsule-cli's Capsule.toml):
