@@ -300,9 +300,10 @@ function playOne(game: GameId, bet: number, identity = IDENTITY, name = NAME): R
 /* ------------------------------------------------------------------ */
 
 const MAX_BET = 3; // hard in-code cap per round, whatever the LLM says
-// gemini-flash-latest: Google retired the free-tier quota of pinned 2.0-flash
-// (limit: 0 as of 2026-07); the -latest alias survives model rotations.
-const LLM_MODEL = "gemini-flash-latest";
+// gemini-2.5-flash: pinned 2.0-flash's free quota was retired, and the
+// gemini-flash-latest alias returns 400 INVALID_ARGUMENT with thinkingConfig
+// (verified 2026-07); 2.5-flash accepts our key + thinkingConfig cleanly.
+const LLM_MODEL = "gemini-2.5-flash";
 
 interface Decision {
   game: GameId;
