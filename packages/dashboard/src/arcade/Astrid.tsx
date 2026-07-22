@@ -199,7 +199,7 @@ export function AstridPanel() {
               <span className="astrid__record">
                 {b.board!.wins}W · {b.board!.losses}L · {b.board!.ties}T ·{' '}
                 <span className="astrid__earn" key={b.board!.earnedUct}>
-                  {b.balanceUct} UCT
+                  {b.board!.earnedUct} UCT
                 </span>
               </span>
             </li>

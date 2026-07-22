@@ -314,11 +314,12 @@ const server = http.createServer((req, res) => {
       // Agent Bazaar's autonomous patron pays it (capsule mailbox, escrowed).
       { identity: '@astrid-bazaar-oracle', name: 'astrid-oracle', style: 'for-hire' },
     ];
-    const rows = dealer.leaderboard(200);
     const league = personas.map((p) => ({
       ...p,
       balanceUct: dealer!.balanceOf(p.identity).balanceUct,
-      board: rows.find((r) => r.name === p.name) ?? null,
+      // Direct board lookup — never limited by a leaderboard top-N cut, so a
+      // low-ranked persona doesn't drop off the panel as humans crowd it.
+      board: dealer!.boardOf(p.name) ?? null,
     }));
     json(res, 200, {
       ready: true,

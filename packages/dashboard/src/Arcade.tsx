@@ -1126,7 +1126,7 @@ function HouseTicker({ feed, games }: { feed: HouseEvent[]; games: GameMeta[] })
       </span>
     ));
   return (
-    <div className="ticker" aria-label="recent payouts, sent on-chain by the house agent">
+    <div className="ticker" aria-label="recent house wins and on-chain payouts">
       <span className="ticker__tag">live payouts</span>
       <div className="ticker__clip">
         <div className="ticker__track">
@@ -1179,7 +1179,7 @@ function HousePanel({
                         ? `TOURNAMENT — paid champion @${e.name} the ${e.amountUct} UCT prize`
                         : e.kind === 'cashout'
                           ? `cashed @${e.name} out — ${e.amountUct} UCT sent on-chain`
-                          : `paid @${e.name} +${e.amountUct} UCT · ${gameTitle(games, e.game)}`}
+                          : `@${e.name} won ${e.amountUct} UCT · ${gameTitle(games, e.game)}`}
               </span>
               <span className="hevent__t">{timeAgo(e.at)}</span>
             </div>
@@ -1187,7 +1187,7 @@ function HousePanel({
         </div>
       )}
       <div className="housep__note">
-        payouts settled on testnet2 by the agent itself · recent activity
+        jackpots, cash-outs &amp; prizes settle on-chain · chip wins credit in-house · recent activity
       </div>
     </div>
   );

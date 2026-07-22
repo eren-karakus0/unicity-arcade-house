@@ -312,6 +312,15 @@ interface TxLike {
  * On a win it pays the player real testnet UCT from the house wallet — a
  * genuine, on-chain, agent-initiated payout with no human in the loop.
  */
+/**
+ * Hard ceiling on a single round's bet (UCT). Bets are otherwise free-form,
+ * but without this cap one huge bet on a high-multiplier game (limbo/crash pay
+ * up to ×1000) pushes chip balances past Number.MAX_SAFE_INTEGER, where every
+ * +/- silently loses integer precision and the house mints unbounded UCT to
+ * cover the corrupted balance. Keeps all chip accounting exact in JS integers.
+ */
+const MAX_BET = 100_000;
+
 export class GameDealer {
   private readonly agent: SphereAgent;
   private readonly baseReward: number;
@@ -451,6 +460,7 @@ export class GameDealer {
     // is spent. Any size goes, as long as the balance covers it.
     const bet = Math.floor(Number(input.bet ?? 1));
     if (!Number.isSafeInteger(bet) || bet < 1) throw new Error('Bet must be a whole number of UCT (1+).');
+    if (bet > MAX_BET) throw new Error(`Table limit is ${MAX_BET.toLocaleString()} UCT per round.`);
     const key = this.keyFor(input.playerAddress);
     const state = welcomeGrant(this.players.get(key) ?? newPlayerState()).state;
     if (state.chips < bet) {
@@ -508,7 +518,7 @@ export class GameDealer {
       state = upd.state;
       streakBonus = upd.streakBonus;
       dailyBonus = upd.dailyBonus;
-      reward = bet * judged.rewardMult + streakBonus + dailyBonus;
+      reward = Math.floor(bet * judged.rewardMult) + streakBonus + dailyBonus;
       state = { ...state, chips: state.chips + reward };
     } else if (judged.outcome === 'tie') {
       reward = bet; // push — the bet comes back
@@ -655,6 +665,7 @@ export class GameDealer {
     }
     const bet = Math.floor(Number(betRaw ?? 1));
     if (!Number.isSafeInteger(bet) || bet < 1) throw new Error('Bet must be a whole number of UCT (1+).');
+    if (bet > MAX_BET) throw new Error(`Table limit is ${MAX_BET.toLocaleString()} UCT per round.`);
     const key = this.keyFor(playerAddress);
     if (playerAddress) this.referralCodes.set(referralCode(key), key);
     const welcomed = welcomeGrant(this.players.get(key) ?? newPlayerState());
@@ -699,7 +710,13 @@ export class GameDealer {
       throw new Error('Action must be hit, stand or double.');
     }
     if (action === 'double') {
-      // Doubling stakes a second bet — check + take it now.
+      // Doubling is only legal on the opening two cards. Validate that BEFORE
+      // taking the second bet — otherwise an illegal double (bjStep throws
+      // below) would debit the extra stake and double table.bet with no
+      // rollback, so the hand settles on a stake the player never agreed to.
+      if (table.hand.done || table.hand.player.length !== 2) {
+        throw new Error('Double is only allowed on your first two cards.');
+      }
       const state = this.players.get(table.key) ?? newPlayerState();
       if (state.chips < table.bet) {
         throw new Error(`Doubling needs another ${table.bet} UCT — you have ${state.chips}.`);
@@ -945,6 +962,16 @@ export class GameDealer {
     return [...this.board.values()]
       .sort((a, b) => b.wins - a.wins || b.earnedUct - a.earnedUct || a.played - b.played)
       .slice(0, limit);
+  }
+
+  /**
+   * A specific player's board row by display name — a direct lookup, NOT
+   * limited by leaderboard()'s top-N slice. The astrid bot-league panel uses
+   * this so a low-ranked persona never silently drops off once human players
+   * crowd it past the leaderboard cut.
+   */
+  boardOf(name: string): LeaderRow | undefined {
+    return this.board.get(name);
   }
 
   /**
