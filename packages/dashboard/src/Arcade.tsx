@@ -32,6 +32,7 @@ import {
   type PlayResult,
   type RoundSettlement,
 } from './lib/arcade';
+import { registerSigner, clearSigner } from './lib/arcadeAuth';
 import { saveProof } from './lib/fairness';
 import { motionOverride, setMotionOverride, systemPrefersReduced } from './lib/motion';
 import { AchievementToast } from './arcade/Achievements';
@@ -68,6 +69,14 @@ const withTableGames = (server: GameMeta[]): GameMeta[] => [
 export function Arcade() {
   const wallet = useWalletCtx();
   const connected = wallet.status === 'connected' && !!wallet.identity;
+
+  // Register the connected wallet as the Sign-In-With-Wallet signer, so the
+  // first chip-moving write can mint a session (one signature). No wallet ⇒ no
+  // signer, and the write routes reject unauthenticated play.
+  useEffect(() => {
+    if (wallet.identity) registerSigner(wallet.identity, wallet.signMessage);
+    else clearSigner();
+  }, [wallet.identity, wallet.signMessage]);
 
   const [selected, setSelected] = useState('rps');
   const [ready, setReady] = useState<boolean | null>(null);

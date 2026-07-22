@@ -190,7 +190,12 @@ function get<T>(path: string): T {
   return http.send(http.Request.get(`${BACKEND}${path}`)) .json<T>();
 }
 function post<T>(path: string, body: unknown): T {
-  const res = http.send(http.Request.post(`${BACKEND}${path}`).json(body));
+  // Sign-In-With-Wallet gates the arcade's write routes for humans; the capsule
+  // is exempt as a trusted agent — it plays as its OWN personas (never a human
+  // wallet), presenting the shared secret it also uses for league reports.
+  const req = http.Request.post(`${BACKEND}${path}`);
+  if (LOCAL_ASTRID_SECRET) req.header("x-arcade-secret", LOCAL_ASTRID_SECRET);
+  const res = http.send(req.json(body));
   return res.json<T>();
 }
 

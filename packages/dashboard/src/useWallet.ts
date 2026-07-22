@@ -54,6 +54,19 @@ function waitForHostReady(timeoutMs = HOST_READY_TIMEOUT): Promise<void> {
   });
 }
 
+/** The wallet's `sign_message` intent result is wallet-defined; normalize it to the signature string. */
+function extractSignature(result: unknown): string {
+  if (typeof result === 'string') return result.trim();
+  if (result && typeof result === 'object') {
+    const o = result as Record<string, unknown>;
+    for (const key of ['signature', 'sig', 'result', 'signedMessage']) {
+      const v = o[key];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  }
+  throw new Error('The wallet returned an unexpected sign-message response.');
+}
+
 export type WalletStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
 export interface WalletState {
@@ -67,6 +80,8 @@ export interface WalletState {
    * `amountBase` is a positive integer string in the coin's base units.
    */
   deposit: (params: { to: string; amountBase: string; coinId: string }) => Promise<void>;
+  /** Sign a plain message (Sign-In-With-Wallet); opens the wallet approval UI. */
+  signMessage: (message: string) => Promise<string>;
 }
 
 export function useWallet(): WalletState {
@@ -166,6 +181,16 @@ export function useWallet(): WalletState {
     [openClient],
   );
 
+  /** Sign-In-With-Wallet: prove wallet control by signing a server challenge. */
+  const signMessage = useCallback(
+    async (message: string): Promise<string> => {
+      const client = await openClient();
+      const result = await client.intent('sign_message', { message });
+      return extractSignature(result);
+    },
+    [openClient],
+  );
+
   const disconnect = useCallback(async () => {
     try {
       await clientRef.current?.disconnect();
@@ -191,5 +216,5 @@ export function useWallet(): WalletState {
     setStatus('idle');
   }, []);
 
-  return { status, identity, error, connect, disconnect, deposit };
+  return { status, identity, error, connect, disconnect, deposit, signMessage };
 }

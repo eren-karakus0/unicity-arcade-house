@@ -11,12 +11,75 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
-import { loadEnv, SphereAgent, GameDealer, GAME_LIST, createLogger, type DealerSnapshot } from '@bazaar/core';
+import {
+  loadEnv,
+  SphereAgent,
+  GameDealer,
+  GAME_LIST,
+  createLogger,
+  verifySignedMessage,
+  type DealerSnapshot,
+} from '@bazaar/core';
 import { createSnapshotStore } from './store.js';
+import { AuthService, addressMatchesIdentity, type Identity } from './auth.js';
 
 const PORT = Number(process.env.PORT ?? process.env.BACKEND_PORT ?? 4500);
 const env = loadEnv();
 const log = createLogger('backend');
+
+// Sign-In-With-Wallet: every human write (play/cash-out/deal) carries a bearer
+// token proving the wallet behind the acting address. The HMAC secret persists
+// tokens across restarts when set; otherwise a fresh random one just makes
+// players re-sign after a redeploy (no security loss).
+const sessionSecret = process.env.ARCADE_SESSION_SECRET?.trim();
+if (!sessionSecret) {
+  log.warn('ARCADE_SESSION_SECRET is unset — using an ephemeral secret; sessions reset on restart.');
+}
+const auth = new AuthService({
+  sessionSecret: sessionSecret || crypto.randomBytes(32).toString('hex'),
+  verify: verifySignedMessage,
+  domain: 'Unicity Arcade House',
+});
+
+// The autonomous capsule plays as its own personas (never as a human wallet),
+// so it is exempted from Sign-In-With-Wallet with the same shared secret it
+// already uses to report league sessions. A write carrying this header may set
+// any address; without it, a write must prove the address via a bearer token.
+const AGENT_SECRET = process.env.ASTRID_REPORT_SECRET?.trim();
+function isTrustedAgent(req: http.IncomingMessage): boolean {
+  if (!AGENT_SECRET) return false;
+  const raw = req.headers['x-arcade-secret'];
+  const presented = Array.isArray(raw) ? raw[0] : raw;
+  const a = Buffer.from(presented ?? '');
+  const b = Buffer.from(AGENT_SECRET);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/** The proven identity behind a request, from its `Authorization: Bearer <token>`. */
+function sessionIdentity(req: http.IncomingMessage): Identity | null {
+  const header = req.headers['authorization'];
+  if (!header || !header.startsWith('Bearer ')) return null;
+  return auth.verifySession(header.slice('Bearer '.length).trim());
+}
+
+/**
+ * Gate a chip-moving write: the caller must be either the trusted capsule (may
+ * act as any persona) or a signed-in wallet acting as ITS OWN address. Returns
+ * true when allowed; otherwise writes a 401/403 and returns false.
+ */
+function authorizeActor(req: http.IncomingMessage, res: http.ServerResponse, address: string | undefined): boolean {
+  if (isTrustedAgent(req)) return true;
+  const identity = sessionIdentity(req);
+  if (!identity) {
+    json(res, 401, { error: 'Sign in with your wallet to play.' });
+    return false;
+  }
+  if (!addressMatchesIdentity(address, identity)) {
+    json(res, 403, { error: 'That action does not match your signed-in wallet.' });
+    return false;
+  }
+  return true;
+}
 
 /** League sessions the capsule reported (real strategist reasons) — bounded,
  *  and persisted so the panel survives the free-tier host's frequent sleeps. */
@@ -180,7 +243,9 @@ async function boot(): Promise<void> {
 function setCors(res: http.ServerResponse): void {
   res.setHeader('access-control-allow-origin', '*');
   res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
-  res.setHeader('access-control-allow-headers', 'content-type');
+  // `authorization` carries the Sign-In-With-Wallet bearer token; `x-arcade-secret`
+  // is the capsule's trusted-agent exemption; `x-astrid-secret` is its report auth.
+  res.setHeader('access-control-allow-headers', 'content-type, authorization, x-arcade-secret, x-astrid-secret');
 }
 function json(res: http.ServerResponse, status: number, obj: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json' });
@@ -361,6 +426,37 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Sign-In-With-Wallet: issue a challenge the wallet signs to prove ownership.
+  if (pathname === '/api/arcade/auth/challenge' && req.method === 'POST') {
+    void readJson(req).then((body) => {
+      try {
+        json(res, 200, auth.issueChallenge(typeof body.chainPubkey === 'string' ? body.chainPubkey : ''));
+      } catch (e) {
+        json(res, 400, { error: e instanceof Error ? e.message : 'could not issue a challenge' });
+      }
+    });
+    return;
+  }
+  // Verify the signed challenge and mint a session token.
+  if (pathname === '/api/arcade/auth/login' && req.method === 'POST') {
+    void readJson(req).then((body) => {
+      try {
+        json(
+          res,
+          200,
+          auth.login({
+            nonce: String(body.nonce ?? ''),
+            signature: String(body.signature ?? ''),
+            nametag: typeof body.nametag === 'string' ? body.nametag : undefined,
+          }),
+        );
+      } catch (e) {
+        json(res, 401, { error: e instanceof Error ? e.message : 'login failed' });
+      }
+    });
+    return;
+  }
+
   if (pathname === '/api/arcade/new' && req.method === 'POST') {
     if (!dealer) {
       json(res, 503, { error: 'The arcade dealer is still waking up — try again in a few seconds.' });
@@ -370,6 +466,11 @@ const server = http.createServer((req, res) => {
       try {
         const game = String(body.game ?? 'rps');
         const address = typeof body.address === 'string' ? body.address : undefined;
+        // /new is intentionally NOT gated: opening a round moves no chips (it only
+        // grants a fresh wallet its one-time welcome stake and returns a snapshot
+        // that /balance already exposes). Auth is enforced at the money-moving
+        // step (/play), so the signature is prompted on the first real play, not
+        // passively when the hall auto-deals a round on connect.
         json(res, 200, dealer!.newRound(game, address));
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'could not start a round';
@@ -390,6 +491,7 @@ const server = http.createServer((req, res) => {
       try {
         const address = typeof body.address === 'string' ? body.address : undefined;
         const name = typeof body.name === 'string' ? body.name : undefined;
+        if (!authorizeActor(req, res, address)) return;
         json(res, 200, dealer!.newTable(String(body.game ?? 'blackjack'), address, body.bet, name));
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'could not open a hand';
@@ -406,6 +508,7 @@ const server = http.createServer((req, res) => {
     void readJson(req).then((body) => {
       try {
         const address = typeof body.address === 'string' ? body.address : undefined;
+        if (!authorizeActor(req, res, address)) return;
         json(res, 200, dealer!.stepTable(String(body.roundId ?? ''), body.action, address));
       } catch (e) {
         json(res, 400, { error: e instanceof Error ? e.message : 'step failed' });
@@ -421,11 +524,13 @@ const server = http.createServer((req, res) => {
     }
     void readJson(req).then(async (body) => {
       try {
+        const address = typeof body.address === 'string' ? body.address : undefined;
+        if (!authorizeActor(req, res, address)) return;
         const result = await dealer!.play({
           roundId: String(body.roundId ?? ''),
           choice: body.choice,
           bet: body.bet,
-          playerAddress: typeof body.address === 'string' ? body.address : undefined,
+          playerAddress: address,
           name: typeof body.name === 'string' ? body.name : undefined,
           ref: typeof body.ref === 'string' ? body.ref : undefined,
         });
@@ -447,6 +552,7 @@ const server = http.createServer((req, res) => {
       try {
         const address = typeof body.address === 'string' ? body.address : '';
         if (!address) throw new Error('Connect a wallet to cash out.');
+        if (!authorizeActor(req, res, address)) return;
         json(res, 200, dealer!.cashOut(address, typeof body.name === 'string' ? body.name : undefined));
       } catch (e) {
         json(res, 400, { error: e instanceof Error ? e.message : 'cash-out failed' });

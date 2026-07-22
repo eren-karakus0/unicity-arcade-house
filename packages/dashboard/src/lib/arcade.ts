@@ -5,6 +5,7 @@
  * additionally re-derives both rolls from the two seeds (verifyDice).
  */
 import { BACKEND_URL, hasBackend } from './backend';
+import { ensureSession } from './arcadeAuth';
 
 export type Outcome = 'win' | 'lose' | 'tie';
 
@@ -142,10 +143,17 @@ export interface Leaderboard {
 
 export { hasBackend };
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(path: string, body: unknown, opts?: { auth?: boolean }): Promise<T> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (opts?.auth) {
+    // Sign-In-With-Wallet: obtain (or reuse) a session token, prompting one
+    // wallet signature the first time. Every chip-moving write carries it.
+    const token = await ensureSession();
+    if (token) headers['authorization'] = `Bearer ${token}`;
+  }
   const r = await fetch(`${BACKEND_URL}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000),
   });
@@ -155,6 +163,8 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 export function newRound(game: string, address?: string): Promise<NewRound> {
+  // Opening a round moves no chips and is not gated server-side, so it carries
+  // no token — the wallet signature is deferred to the first real play.
   return post<NewRound>('/api/arcade/new', { game, address });
 }
 
@@ -167,14 +177,18 @@ export function playRound(input: {
   name?: string;
   ref?: string;
 }): Promise<PlayResult> {
-  return post<PlayResult>('/api/arcade/play', {
-    roundId: input.roundId,
-    choice: input.choice,
-    bet: input.bet,
-    address: input.address,
-    name: input.name,
-    ref: input.ref,
-  });
+  return post<PlayResult>(
+    '/api/arcade/play',
+    {
+      roundId: input.roundId,
+      choice: input.choice,
+      bet: input.bet,
+      address: input.address,
+      name: input.name,
+      ref: input.ref,
+    },
+    { auth: true },
+  );
 }
 
 // ---- multi-step tables (blackjack) ----
@@ -204,11 +218,11 @@ export interface TableView {
 }
 
 export function newTable(game: string, bet: number, address?: string, name?: string): Promise<TableView> {
-  return post<TableView>('/api/arcade/table/new', { game, bet, address, name });
+  return post<TableView>('/api/arcade/table/new', { game, bet, address, name }, { auth: true });
 }
 
 export function stepTable(roundId: string, action: 'hit' | 'stand' | 'double', address?: string): Promise<TableView> {
-  return post<TableView>('/api/arcade/table/step', { roundId, action, address });
+  return post<TableView>('/api/arcade/table/step', { roundId, action, address }, { auth: true });
 }
 
 /** Browser twin of the server's deriveDeck — the whole shoe from the secret. */
@@ -254,7 +268,7 @@ export async function verifyBlackjack(
 
 /** Withdraw the wallet's in-house balance 1:1 as UCT, settled on-chain by the house. */
 export function cashOut(address: string, name?: string): Promise<{ settlementId: string; amountUct: number }> {
-  return post<{ settlementId: string; amountUct: number }>('/api/arcade/cashout', { address, name });
+  return post<{ settlementId: string; amountUct: number }>('/api/arcade/cashout', { address, name }, { auth: true });
 }
 
 /** The caller's in-house UCT balance (polled after a wallet deposit). */
