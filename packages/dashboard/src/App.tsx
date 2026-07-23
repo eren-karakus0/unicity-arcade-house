@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Arcade } from './Arcade';
 import { ConnectWallet } from './ConnectWallet';
 import { Fairness } from './Fairness';
@@ -7,6 +7,10 @@ import { captureRef } from './lib/arcade';
 import { NavLink } from './lib/nav';
 import { Card, Coin, Die, HandScissors, PlinkoMark } from './arcade/art';
 import { isMuted, setMuted, sfx } from './arcade/sound';
+
+// The 3D arena pulls in Three.js — lazy-load it so its chunk only ships when a
+// visitor actually opens /arena, keeping the main arcade bundle lean.
+const Arena = lazy(() => import('./arcade/Arena'));
 
 /**
  * Tiny path router — clean URLs (`/fairness`, `/profile`), no `#`. The SPA
@@ -41,6 +45,16 @@ function useRoute(): string {
 export function App() {
   const route = useRoute();
   useEffect(() => captureRef(), []); // grab a ?ref= invite before anything else
+
+  // The arena is a full-bleed cinematic takeover — no header/footer chrome.
+  if (route === '/arena') {
+    return (
+      <Suspense fallback={<div className="arena-boot">entering the arena…</div>}>
+        <Arena />
+      </Suspense>
+    );
+  }
+
   return (
     <div className="app">
       <WallArt />

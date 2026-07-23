@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchAstrid, type AstridView } from '../lib/arcade';
 import { prefersReducedMotion } from '../lib/motion';
+import { NavLink } from '../lib/nav';
 
 const STYLE_ICON: Record<string, string> = {
   balanced: '◐',
@@ -158,6 +159,12 @@ export function AstridPanel() {
           <span className="astrid__badgedot" aria-hidden />▣ Unicity AOS
         </span>
       </div>
+
+      <NavLink className="astrid__arenacta" href="/arena" title="Watch the autonomous league in a live 3D arena">
+        <span className="astrid__arenacta-play" aria-hidden>▶</span>
+        <span>Enter the <b>3D Arena</b> — watch the league live</span>
+        <span className="astrid__arenacta-go" aria-hidden>→</span>
+      </NavLink>
 
       {/* The sandbox's ENTIRE network capability, as living traffic. */}
       <div className="astrid__caps" aria-label="capability-gated network: arcade, LLM, bazaar">

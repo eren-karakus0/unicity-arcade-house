@@ -1,0 +1,206 @@
+/* ============================================================
+   UNICITY ARENA · 3D — a full-page cinematic showcase of the
+   autonomous bot league, driven by REAL data from /api/arcade/astrid.
+   Brand-cohesive: Unicity orange on near-black, trophy metals
+   (gold / copper / steel) — no neon. A metallic provably-fair coin
+   (Three.js) is the hero; a restrained broadcast HUD sits over it.
+   All classes are `a3-` prefixed to never collide with app.css.
+   ============================================================ */
+.a3-root {
+  --a3-gold: #ffcf4d;
+  --a3-copper: #c8823f;
+  --a3-steel: #9aa7b8;
+  --a3-lose: #c85a48;
+  --a3-line: rgba(255, 240, 225, 0.10);
+  --a3-line2: rgba(255, 150, 60, 0.30);
+  --a3-glass: rgba(13, 11, 10, 0.60);
+  --a3-glass2: rgba(20, 16, 13, 0.80);
+  --a3-dim: #a99e93;
+  --a3-dimmer: #756b61;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: var(--bg-root);
+  color: var(--text-primary);
+  overflow: hidden;
+  font-family: var(--font-body);
+}
+.a3-gl { position: absolute; inset: 0; z-index: 0; display: block; width: 100%; height: 100%; }
+.a3-vig { position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 42%, transparent 46%, rgba(0,0,0,0.55) 100%); }
+.a3-flash { position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0;
+  background: radial-gradient(60% 50% at 50% 44%, rgba(255,150,60,0.5), transparent 70%);
+  transition: opacity 0.5s; mix-blend-mode: screen; }
+
+.a3-hud { position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  display: grid; grid-template-rows: auto 1fr; overflow-y: auto;
+  padding: clamp(14px,2.3vw,26px) clamp(14px,2.6vw,30px) clamp(14px,2vw,24px); gap: 14px; }
+
+/* exit / back link (only interactive element) */
+.a3-exit { position: absolute; z-index: 5; pointer-events: auto; }
+
+/* ---------- TOP BAR ---------- */
+.a3-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.a3-brand { display: flex; align-items: center; gap: 14px; }
+.a3-mark { width: 46px; height: 46px; flex: none; }
+.a3-brand h1 { margin: 0; font-family: var(--font-display); font-weight: 400; letter-spacing: 0.01em;
+  font-size: clamp(22px,3.8vw,38px); line-height: 0.94; text-transform: uppercase; }
+.a3-brand h1 b { color: var(--brand-orange); font-weight: 400; }
+.a3-brand .a3-sea { margin-top: 3px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.22em;
+  text-transform: uppercase; color: var(--a3-dim); }
+.a3-brand .a3-sea .a3-s { color: var(--brand-orange); }
+.a3-tr { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.a3-back { display: inline-flex; align-items: center; gap: 7px; pointer-events: auto; cursor: pointer;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--a3-dim);
+  padding: 7px 13px; border-radius: 100px; border: 1px solid var(--a3-line); background: var(--a3-glass);
+  text-decoration: none; transition: color .2s, border-color .2s; }
+.a3-back:hover { color: var(--text-primary); border-color: var(--a3-line2); }
+.a3-live { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 10.5px;
+  letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-secondary); padding: 7px 13px; border-radius: 100px;
+  border: 1px solid var(--a3-line2); background: rgba(255,111,0,0.07); }
+.a3-live .a3-d { width: 7px; height: 7px; border-radius: 50%; background: var(--brand-orange); animation: a3pulse 1.9s infinite; }
+@keyframes a3pulse { 0%{box-shadow:0 0 0 0 rgba(255,111,0,.6)} 70%{box-shadow:0 0 0 8px rgba(255,111,0,0)} 100%{box-shadow:0 0 0 0 rgba(255,111,0,0)} }
+.a3-prize { display: flex; align-items: center; gap: 11px; padding: 8px 15px 8px 11px; border-radius: 13px;
+  background: var(--a3-glass2); border: 1px solid var(--a3-line); backdrop-filter: blur(8px); }
+.a3-prize svg { width: 28px; height: 28px; }
+.a3-prize .a3-k { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--a3-dimmer); }
+.a3-prize .a3-v { font-family: var(--font-display); font-weight: 400; font-size: 26px; color: var(--a3-gold);
+  font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: 0.01em; }
+.a3-prize .a3-v small { font-size: 0.42em; color: var(--a3-dim); letter-spacing: 0.06em; }
+
+/* ---------- MIDDLE (3D shows through) ---------- */
+.a3-mid { position: relative; }
+.a3-kicker { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); text-align: center;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--a3-dimmer); white-space: nowrap; }
+.a3-kicker b { color: var(--brand-orange); font-weight: 500; }
+/* right rail — league standings + live feed, aligned & stacked */
+.a3-rightrail { position: absolute; top: 0; right: 0; width: min(340px, 86vw); max-height: 100%;
+  display: flex; flex-direction: column; gap: 12px; }
+
+/* left panel — the current play (agent identity + strategist + provably-fair) */
+.a3-nowpanel { position: absolute; bottom: 0; left: 0; width: min(540px, 94vw);
+  box-shadow: 0 14px 40px -22px var(--a3-ac, rgba(255,111,0,0.7)); transition: box-shadow .4s; }
+.a3-nowhead { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; }
+.a3-nowhead .a3-npc { width: 32px; height: 32px; flex: none; filter: drop-shadow(0 0 6px var(--a3-ac)); }
+.a3-nowhead .a3-npn { font-weight: 700; font-size: 15px; white-space: nowrap; }
+.a3-nowhead .a3-nps { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--a3-dim); white-space: nowrap; }
+.a3-nowhead .a3-npp { margin-left: auto; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--a3-dimmer); padding: 5px 10px; border: 1px solid var(--a3-line); border-radius: 100px; white-space: nowrap; }
+.a3-nowhead .a3-npp.a3-on { color: var(--brand-orange); border-color: var(--a3-line2); }
+
+.a3-celebrate { position: absolute; top: 33%; left: 50%; transform: translate(-50%,-50%) scale(.6); opacity: 0; text-align: center; pointer-events: none; }
+.a3-celebrate.a3-show { animation: a3celeb 1.4s cubic-bezier(.2,.8,.2,1) forwards; }
+@keyframes a3celeb { 0%{opacity:0;transform:translate(-50%,-50%) scale(.6)} 16%{opacity:1;transform:translate(-50%,-50%) scale(1.06)} 72%{opacity:1;transform:translate(-50%,-50%) scale(1)} 100%{opacity:0;transform:translate(-50%,-50%) scale(1.12)} }
+.a3-celebrate .a3-big { font-family: var(--font-display); font-weight: 400; font-size: clamp(30px,7vw,66px); letter-spacing: 0.01em; text-transform: uppercase; line-height: 1;
+  color: var(--a3-gold); text-shadow: 0 0 40px rgba(255,207,77,0.5); }
+.a3-celebrate.a3-jack .a3-big { color: var(--brand-orange); text-shadow: 0 0 44px var(--brand-orange); }
+.a3-celebrate .a3-camt { font-family: var(--font-mono); font-size: clamp(13px,2.4vw,20px); margin-top: 8px; color: var(--text-primary); }
+
+@media (max-width: 980px){
+  .a3-mid { min-height: auto; display: flex; flex-direction: column; gap: 12px; padding-top: 24px; }
+  .a3-kicker { position: static; transform: none; white-space: normal; order: 0; }
+  .a3-nowpanel { position: static; width: auto; order: 1; box-shadow: none; }
+  .a3-rightrail { position: static; width: auto; order: 2; max-height: none; }
+  .a3-celebrate { position: fixed; top: 40%; }
+}
+
+.a3-panel { border-radius: 15px; background: var(--a3-glass); border: 1px solid var(--a3-line); backdrop-filter: blur(10px); padding: 14px; }
+.a3-ph { display: flex; align-items: center; justify-content: space-between; margin-bottom: 11px; }
+.a3-ph .a3-t { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--a3-dim); }
+.a3-ph .a3-n { font-family: var(--font-mono); font-size: 9.5px; color: var(--a3-dimmer); }
+
+/* leader strip — real crests in metal rings, rank badge, crown on #1 */
+.a3-podium { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; align-items: start; }
+.a3-lead { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 13px 6px 9px; border-radius: 12px; background: linear-gradient(180deg, rgba(255,255,255,0.035), transparent 70%); border: 1px solid var(--a3-line); }
+.a3-lead.a3-l1 { background: linear-gradient(180deg, rgba(255,207,77,0.1), transparent 72%); border-color: rgba(255,207,77,0.34); }
+.a3-lead.a3-l2 { border-color: rgba(154,167,184,0.28); }
+.a3-lead.a3-l3 { border-color: rgba(200,130,63,0.28); }
+.a3-crown { position: absolute; top: -8px; font-size: 14px; color: var(--a3-gold); filter: drop-shadow(0 0 6px rgba(255,207,77,0.6)); }
+.a3-ring { position: relative; width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle at 34% 28%, rgba(255,255,255,0.07), rgba(0,0,0,0.2) 70%);
+  border: 2px solid var(--ring, var(--a3-gold)); box-shadow: 0 0 15px -4px var(--ring, var(--a3-gold)); }
+.a3-ringcrest { width: 28px; height: 28px; }
+.a3-ringcrest svg { display: block; width: 100%; height: 100%; }
+.a3-rankn { position: absolute; bottom: -6px; right: -4px; width: 17px; height: 17px; border-radius: 50%;
+  background: var(--ring, var(--a3-gold)); color: #060606; font-family: var(--font-display); font-size: 11px; line-height: 17px; text-align: center; }
+.a3-lname { font-family: var(--font-mono); font-size: 9.5px; color: var(--a3-dim); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a3-learn { font-family: var(--font-display); font-weight: 400; font-size: 16px; font-variant-numeric: tabular-nums; color: var(--text-primary); line-height: 1; }
+.a3-learn em { font-family: var(--font-body); font-style: normal; font-weight: 600; font-size: 0.44em; color: var(--a3-dim); }
+.a3-lead.a3-l1 .a3-learn { color: var(--a3-gold); }
+.a3-lead.a3-l2 .a3-learn { color: var(--a3-steel); }
+.a3-lead.a3-l3 .a3-learn { color: var(--a3-copper); }
+
+.a3-cards { display: flex; flex-direction: column; gap: 8px; }
+.a3-pc { position: relative; display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+  padding: 9px 11px; border-radius: 12px; overflow: hidden;
+  background: linear-gradient(100deg, var(--a3-tint), rgba(16,13,11,0.5) 60%);
+  border: 1px solid var(--a3-line); transition: transform .55s cubic-bezier(.2,.8,.2,1), border-color .4s, box-shadow .4s; }
+.a3-pc.a3-acting { border-color: var(--a3-ac); box-shadow: 0 6px 26px -12px var(--a3-ac); }
+.a3-pc .a3-sw { position:absolute; inset:0; opacity:0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.07) 50%, transparent 70%); transform: translateX(-100%); }
+.a3-pc.a3-acting .a3-sw { opacity:1; animation: a3sweep 1.8s ease-in-out infinite; }
+@keyframes a3sweep { to { transform: translateX(100%); } }
+.a3-pc .a3-cr { width: 40px; height: 40px; flex: none; filter: drop-shadow(0 0 6px var(--a3-ac)); }
+.a3-pc .a3-info { min-width: 0; }
+.a3-pc .a3-nm { font-weight: 700; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a3-pc .a3-rk { font-family: var(--font-mono); font-size: 9.5px; color: var(--a3-dimmer); margin-top: 2px; }
+.a3-pc .a3-rk .a3-mv.a3-up { color: var(--a3-gold); } .a3-pc .a3-rk .a3-mv.a3-dn { color: var(--a3-lose); }
+.a3-pc .a3-bank { text-align: right; white-space: nowrap; }
+.a3-pc .a3-bank .a3-b { font-family: var(--font-display); font-weight: 400; font-size: 18px; font-variant-numeric: tabular-nums; transition: color .3s; }
+.a3-pc .a3-bank .a3-b em { font-family: var(--font-body); font-style: normal; font-weight: 600; font-size: 0.5em; color: var(--a3-dim); }
+.a3-pc .a3-bank .a3-rc { font-family: var(--font-mono); font-size: 9.5px; color: var(--a3-dimmer); }
+.a3-pc .a3-bank .a3-rc .a3-w { color: var(--a3-gold); } .a3-pc .a3-bank .a3-rc .a3-l { color: var(--a3-lose); }
+.a3-fu { animation: a3fu .7s ease; } .a3-fd { animation: a3fd .7s ease; }
+@keyframes a3fu { 0%,100%{color:var(--text-primary)} 30%{color:var(--a3-gold)} }
+@keyframes a3fd { 0%,100%{color:var(--text-primary)} 30%{color:var(--a3-lose)} }
+
+/* ---------- current-play panel contents ---------- */
+.a3-thought { min-height: 38px; font-size: 13px; line-height: 1.5; color: var(--text-primary);
+  padding: 9px 12px; border-radius: 9px; background: rgba(6,5,4,0.5); border: 1px solid var(--a3-line); }
+.a3-thought .a3-lead { font-family: var(--font-mono); font-size: 10.5px; color: var(--brand-orange); }
+.a3-thought .a3-cur { color: var(--brand-orange); animation: a3blink 1s steps(2) infinite; }
+@keyframes a3blink { 50% { opacity: 0; } }
+.a3-fair { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+@media (max-width: 520px){ .a3-fair { grid-template-columns: 1fr 1fr; } .a3-fair .a3-oc { grid-column: 1/-1; } }
+.a3-ho { border-radius: 9px; padding: 9px 11px; background: rgba(10,8,7,0.55); border: 1px solid var(--a3-line); min-width: 0; }
+.a3-ho .a3-k { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--a3-dimmer); margin-bottom: 4px; }
+.a3-ho .a3-h { font-family: var(--font-mono); font-size: 10.5px; word-break: break-all; color: var(--a3-dim); line-height: 1.5; }
+.a3-ho.a3-commit.a3-lock { border-color: var(--a3-line2); box-shadow: inset 0 0 18px -8px rgba(255,111,0,0.6); }
+.a3-ho.a3-commit.a3-lock .a3-k, .a3-ho.a3-commit.a3-lock .a3-h { color: var(--brand-orange); }
+.a3-ho.a3-reveal { opacity: 0.4; }
+.a3-ho.a3-reveal.a3-open { opacity: 1; border-color: rgba(255,207,77,0.4); animation: a3crack .5s cubic-bezier(.2,.8,.2,1); }
+.a3-ho.a3-reveal.a3-open .a3-k { color: var(--a3-gold); } .a3-ho.a3-reveal.a3-open .a3-h { color: var(--text-primary); }
+@keyframes a3crack { 0%{transform:perspective(500px) rotateX(-80deg);opacity:0} 100%{transform:none;opacity:1} }
+.a3-vf { font-family: var(--font-mono); font-size: 9px; margin-top: 5px; color: var(--a3-dimmer); }
+.a3-vf.a3-ok { color: var(--a3-gold); }
+.a3-oc { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  border-radius: 9px; padding: 8px 18px; min-width: 116px; background: rgba(10,8,7,0.5); border: 1px solid var(--a3-line); transition: all .35s; }
+.a3-oc .a3-r { font-family: var(--font-display); font-weight: 400; font-size: 22px; text-transform: uppercase; color: var(--a3-dim); line-height: 1.05; }
+.a3-oc .a3-a { font-family: var(--font-mono); font-size: 12px; color: var(--a3-dim); }
+.a3-oc.a3-win { background: rgba(255,207,77,0.08); border-color: rgba(255,207,77,0.4); } .a3-oc.a3-win .a3-r, .a3-oc.a3-win .a3-a { color: var(--a3-gold); }
+.a3-oc.a3-lose { background: rgba(200,90,72,0.08); border-color: rgba(200,90,72,0.35); } .a3-oc.a3-lose .a3-r, .a3-oc.a3-lose .a3-a { color: var(--a3-lose); }
+.a3-oc.a3-neutral .a3-r { color: var(--a3-steel); }
+
+.a3-feed { display: flex; flex-direction: column; max-height: 208px; overflow: hidden; }
+.a3-fr { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 7px 2px;
+  border-top: 1px solid var(--a3-line); font-size: 12px; animation: a3slide .4s ease; }
+.a3-fr:first-child { border-top: none; }
+@keyframes a3slide { from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:none} }
+.a3-fr .a3-i { width: 18px; text-align: center; font-size: 13px; }
+.a3-fr .a3-x { color: var(--a3-dim); min-width: 0; } .a3-fr .a3-x b { color: var(--text-primary); font-weight: 700; }
+.a3-fr .a3-fv { font-family: var(--font-mono); font-size: 11px; white-space: nowrap; color: var(--a3-dim); }
+.a3-fr.a3-win .a3-fv, .a3-fr.a3-win .a3-i { color: var(--a3-gold); }
+.a3-fr.a3-lose .a3-fv { color: var(--a3-lose); } .a3-fr.a3-lose .a3-i { color: var(--a3-dimmer); }
+
+.a3-rise { opacity: 0; transform: translateY(14px); animation: a3rise .7s cubic-bezier(.2,.7,.2,1) forwards; }
+@keyframes a3rise { to { opacity: 1; transform: none; } }
+
+/* graceful "warming up" state */
+.a3-idle { grid-column: 1 / -1; text-align: center; font-family: var(--font-mono); font-size: 12px;
+  letter-spacing: 0.08em; color: var(--a3-dimmer); padding: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .a3-root *, .a3-root *::before, .a3-root *::after {
+    animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
+  .a3-rise { opacity:1; transform:none; } .a3-ho.a3-reveal { opacity:1; } .a3-celebrate.a3-show { animation: none; opacity: 1; }
+}

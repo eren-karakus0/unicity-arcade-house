@@ -3093,3 +3093,52 @@ button.arcade__chip--motionon { color: var(--accent); border-style: solid; }
     animation: none;
   }
 }
+
+/* ---- Enter-the-3D-Arena CTA (in the Autonomous Players panel) ---- */
+.astrid__arenacta {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 12px 0 2px;
+  padding: 11px 14px;
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--text-primary);
+  background: linear-gradient(100deg, rgba(255, 111, 0, 0.16), rgba(255, 111, 0, 0.04) 70%);
+  border: 1px solid var(--border-focus);
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
+}
+.astrid__arenacta:hover {
+  border-color: rgba(255, 111, 0, 0.5);
+  box-shadow: 0 8px 30px -14px rgba(255, 111, 0, 0.7);
+  transform: translateY(-1px);
+}
+.astrid__arenacta b { color: var(--accent); font-weight: 700; }
+.astrid__arenacta-play {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #060606;
+  font-size: 10px;
+}
+.astrid__arenacta-go { margin-left: auto; color: var(--accent); font-size: 16px; }
+
+/* fallback shown while the lazy arena chunk (Three.js) loads */
+.arena-boot {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg-root);
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
