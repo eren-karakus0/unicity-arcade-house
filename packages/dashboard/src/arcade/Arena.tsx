@@ -422,7 +422,13 @@ export default function Arena() {
       <div className="a3-hud">
         <header className="a3-top a3-rise">
           <div className="a3-brand">
-            <svg className="a3-mark" viewBox="0 0 100 100"><polygon points="50,7 87,28 87,72 50,93 13,72 13,28" fill="none" stroke="#ff6f00" strokeWidth="7" /><circle cx="50" cy="50" r="14" fill="#ff6f00" /></svg>
+            <svg className="a3-mark" viewBox="0 0 100 100" aria-label="Unicity Arcade House">
+              <defs><linearGradient id="a3logo" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#ff9a4d" /><stop offset="100%" stopColor="#ff6f00" /></linearGradient></defs>
+              <rect x="8" y="8" width="84" height="84" rx="20" fill="url(#a3logo)" />
+              <circle cx="32" cy="32" r="7" fill="#0a0a0a" /><circle cx="68" cy="32" r="7" fill="#0a0a0a" />
+              <circle cx="50" cy="50" r="7" fill="#0a0a0a" />
+              <circle cx="32" cy="68" r="7" fill="#0a0a0a" /><circle cx="68" cy="68" r="7" fill="#0a0a0a" />
+            </svg>
             <div>
               <h1>Unicity <b>Arena</b></h1>
               <div className="a3-sea"><span className="a3-s">AUTONOMOUS LEAGUE</span> · <span data-el="rounds">LIVE</span></div>
@@ -439,7 +445,23 @@ export default function Arena() {
         </header>
 
         <div className="a3-mid">
-          <div className="a3-kicker a3-rise">four <b>autonomous</b> agents · <b>provably-fair</b> · live on <b data-el="kernel">Unicity AOS</b></div>
+          <section className="a3-panel a3-nowpanel a3-rise" data-el="nowpanel" style={{ animationDelay: '.26s' }}>
+            <div className="a3-nowhead">
+              <span className="a3-npc" data-el="nowCrest" />
+              <div><div className="a3-npn" data-el="nowName">warming up</div><div className="a3-nps" data-el="nowSt">the league takes the floor</div></div>
+              <span className="a3-npp" data-el="phase">idle</span>
+            </div>
+            <div className="a3-thought" data-el="thought"><span className="a3-cur">▌</span></div>
+            <div className="a3-fair" style={{ marginTop: '10px' }}>
+              <div className="a3-ho a3-commit" data-el="commit"><div className="a3-k">house commit · sha256(secret:nonce)</div><div className="a3-h" data-el="commitH">—</div></div>
+              <div className="a3-ho a3-reveal" data-el="reveal"><div className="a3-k">reveal</div><div className="a3-h" data-el="revealH">sealed</div><div className="a3-vf" data-el="vf">○ verifying…</div></div>
+              <div className="a3-oc" data-el="oc"><span className="a3-r" data-el="res">—</span><span className="a3-a" data-el="amt" /></div>
+            </div>
+          </section>
+
+          <div className="a3-center">
+            <div className="a3-kicker a3-rise">four <b>autonomous</b> agents · <b>provably-fair</b> · live on <b data-el="kernel">Unicity AOS</b></div>
+          </div>
 
           <aside className="a3-rightrail">
             <section className="a3-panel a3-rise" style={{ animationDelay: '.14s' }}>
@@ -455,20 +477,6 @@ export default function Arena() {
           </aside>
 
           <div className="a3-celebrate" data-el="celebrate"><div className="a3-big" data-el="celBig" /><div className="a3-camt" data-el="celAmt" /></div>
-
-          <section className="a3-panel a3-nowpanel a3-rise" data-el="nowpanel" style={{ animationDelay: '.26s' }}>
-            <div className="a3-nowhead">
-              <span className="a3-npc" data-el="nowCrest" />
-              <div><div className="a3-npn" data-el="nowName">warming up</div><div className="a3-nps" data-el="nowSt">the league takes the floor</div></div>
-              <span className="a3-npp" data-el="phase">idle</span>
-            </div>
-            <div className="a3-thought" data-el="thought"><span className="a3-cur">▌</span></div>
-            <div className="a3-fair" style={{ marginTop: '10px' }}>
-              <div className="a3-ho a3-commit" data-el="commit"><div className="a3-k">house commit · sha256(secret:nonce)</div><div className="a3-h" data-el="commitH">—</div></div>
-              <div className="a3-ho a3-reveal" data-el="reveal"><div className="a3-k">reveal</div><div className="a3-h" data-el="revealH">sealed</div><div className="a3-vf" data-el="vf">○ verifying…</div></div>
-              <div className="a3-oc" data-el="oc"><span className="a3-r" data-el="res">—</span><span className="a3-a" data-el="amt" /></div>
-            </div>
-          </section>
         </div>
       </div>
     </div>
