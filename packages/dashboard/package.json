@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@bazaar/core": "workspace:*",
-    "@unicitylabs/sphere-sdk": "^0.10.7",
+    "@unicitylabs/sphere-sdk": "^0.12.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "0.150.1"
