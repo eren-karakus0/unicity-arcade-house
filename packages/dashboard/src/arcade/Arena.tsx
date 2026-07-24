@@ -15,11 +15,15 @@
  * typewriter + per-frame 3D never trigger React re-renders. React only mounts
  * the static skeleton and owns setup/teardown.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import './arena.css';
 import { fetchAstrid, fetchLeaderboard, type AstridBot } from '../lib/arcade';
 import { prefersReducedMotion } from '../lib/motion';
+import { isMuted, setMuted, sfx } from './sound';
 import { go } from '../lib/nav';
 
 interface StyleMeta { css: string; hex: number; tint: string }
@@ -44,6 +48,8 @@ interface Play { name: string; style: string; game: string; bet: number; outcome
 
 export default function Arena() {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const [muted, setMutedState] = useState(isMuted());
+  const toggleMute = () => { const next = !isMuted(); setMuted(next); setMutedState(next); if (!next) sfx.click(); };
 
   useEffect(() => {
     const root = rootRef.current;
@@ -121,9 +127,71 @@ export default function Arena() {
       map: dieTex[n - 1]!, emissive: 0xff6f00, emissiveMap: dieTex[n - 1]!, emissiveIntensity: 0.24,
       metalness: 0.6, roughness: 0.34, envMap: env,
     }));
-    const grp = new THREE.Group(); scene.add(grp);
+    const grp = new THREE.Group();
     const die = new THREE.Mesh(new THREE.BoxGeometry(1.58, 1.58, 1.58), dieMats);
     grp.add(die); grp.rotation.set(-0.4, 0.62, 0.12);
+
+    // (E) additional hero shapes — the centre morphs to the active game. Each,
+    // like the die, is DARK METAL with a glowing accent that carries the agent
+    // colour (the accent is what `mats` tints/pulses — bodies stay rich metal).
+
+    // COIN (coin / rps): dark coin with a glowing Unicity hex emblem (not die pips).
+    const coinFaceTex = (() => {
+      const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d')!;
+      const bg = g.createRadialGradient(128, 104, 16, 128, 128, 150); bg.addColorStop(0, '#221a12'); bg.addColorStop(1, '#0a0807');
+      g.fillStyle = bg; g.beginPath(); g.arc(128, 128, 126, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(255,150,60,0.2)'; g.lineWidth = 9; g.beginPath(); g.arc(128, 128, 114, 0, 7); g.stroke();
+      g.strokeStyle = '#ff6f00'; g.lineWidth = 16; g.lineJoin = 'round'; g.beginPath();
+      for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3, x = 128 + 58 * Math.cos(a), y = 128 + 58 * Math.sin(a); if (i) g.lineTo(x, y); else g.moveTo(x, y); }
+      g.closePath(); g.stroke();
+      g.fillStyle = '#ff6f00'; g.beginPath(); g.arc(128, 128, 20, 0, 7); g.fill();
+      const t = new THREE.CanvasTexture(c); t.anisotropy = 8; t.encoding = THREE.sRGBEncoding; return t;
+    })();
+    const coinFaceMat = new THREE.MeshStandardMaterial({ map: coinFaceTex, emissive: 0xff6f00, emissiveMap: coinFaceTex, emissiveIntensity: 0.3, metalness: 0.75, roughness: 0.3, envMap: env });
+    const coinEdgeMat = new THREE.MeshStandardMaterial({ color: 0x7a726a, metalness: 1, roughness: 0.32, envMap: env });
+    const coinGrp = new THREE.Group();
+    const coinMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.24, 1.24, 0.2, 64), [coinEdgeMat, coinFaceMat, coinFaceMat]);
+    coinMesh.rotation.x = Math.PI / 2; coinGrp.add(coinMesh);
+
+    // ROCKET (crash / limbo): dark metal body, glowing fins (only the fins tint).
+    const rocketBodyMat = new THREE.MeshStandardMaterial({ color: 0x2b2621, emissive: 0x000000, metalness: 0.9, roughness: 0.28, envMap: env });
+    const rocketFinMat = new THREE.MeshStandardMaterial({ color: 0x120d08, emissive: 0xff6f00, emissiveIntensity: 0.4, metalness: 0.6, roughness: 0.4, envMap: env });
+    const rocketGrp = new THREE.Group();
+    const rBody = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.52, 1.5, 28), rocketBodyMat);
+    const rNose = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.78, 28), rocketFinMat); rNose.position.y = 1.14; // glowing nose cone
+    const mkFin = (x: number, rot: number) => { const f = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.55, 0.06), rocketFinMat); f.position.set(x, -0.72, 0); f.rotation.z = rot; return f; };
+    rocketGrp.add(rBody, rNose, mkFin(0.44, -0.42), mkFin(-0.44, 0.42));
+    // exhaust flame — two additive cones (orange plume + white-hot core) that
+    // flicker; longer while the rocket is firing (roll/settle), a pilot flame at rest.
+    const flameOuterMat = new THREE.MeshBasicMaterial({ color: 0xff7a1e, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false });
+    const flameInnerMat = new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+    const flameOuter = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.35, 20), flameOuterMat); flameOuter.rotation.x = Math.PI; flameOuter.position.y = -1.4;
+    const flameInner = new THREE.Mesh(new THREE.ConeGeometry(0.21, 0.9, 16), flameInnerMat); flameInner.rotation.x = Math.PI; flameInner.position.y = -1.15;
+    const flameGrp = new THREE.Group(); flameGrp.add(flameOuter, flameInner); rocketGrp.add(flameGrp);
+
+    // GEM (mines / plinko / wheel / number / … ): a faceted crystal. Many facets +
+    // sharp, highly-reflective metal make each face catch the env-map differently
+    // (that's the "design"); a restrained emissive tints it the agent colour
+    // without washing the facets flat (see the per-hero `glow` scale below).
+    const gemMat = new THREE.MeshStandardMaterial({ color: 0x14100b, emissive: 0xff6f00, emissiveIntensity: 0.4, metalness: 0.96, roughness: 0.1, envMap: env, flatShading: true });
+    const gemGrp = new THREE.Group();
+    gemGrp.add(new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), gemMat));
+
+    interface Hero { grp: THREE.Group; mats: THREE.MeshStandardMaterial[]; glow?: number }
+    const HEROES: Record<string, Hero> = {
+      die: { grp, mats: dieMats },
+      coin: { grp: coinGrp, mats: [coinFaceMat] },
+      rocket: { grp: rocketGrp, mats: [rocketFinMat] },
+      gem: { grp: gemGrp, mats: [gemMat], glow: 0.5 },
+    };
+    Object.values(HEROES).forEach((h) => { h.grp.visible = false; scene.add(h.grp); });
+    const heroTypeFor = (game: string): string =>
+      game === 'coin' || game === 'rps' ? 'coin'
+        : game === 'crash' || game === 'limbo' ? 'rocket'
+          : game === 'dice' ? 'die' : 'gem';
+    let heroKey = 'die';
+    let hero: Hero = HEROES.die!;
+    hero.grp.visible = true;
 
     // Ambient FLOW FIELD — thousands of tiny points drifting through the arena
     // (GPU-animated in a vertex shader), so the whole space reads as living
@@ -187,33 +255,130 @@ export default function Arena() {
       burstAttr.needsUpdate = true;
     };
 
+    // (D) cinematic bloom — only the bright orange emissive (pips, arc, field)
+    // blooms, giving the scene a glow. Skipped on mobile for perf (renders direct).
+    const composer = MOBILE ? null : new EffectComposer(renderer);
+    let bloom: UnrealBloomPass | null = null;
+    if (composer) {
+      composer.addPass(new RenderPass(scene, camera));
+      bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.62, 0.55, 0.82);
+      composer.addPass(bloom);
+    }
+
     let mx = 0, my = 0;
     const onMove = (e: PointerEvent) => { mx = e.clientX / window.innerWidth - 0.5; my = e.clientY / window.innerHeight - 0.5; };
-    const onResize = () => { renderer.setSize(window.innerWidth, window.innerHeight); camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); };
+    const onResize = () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      composer?.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+    };
     window.addEventListener('pointermove', onMove); window.addEventListener('resize', onResize);
 
     let charge = 0, target = 0, winF = 0, raf = 0;
-    let rvx = 0.0035, rvy = 0.0052, rvz = 0.0009;               // die angular velocity
+    // hero roll → settle state machine, generalized across die / coin / rocket / gem
+    let mode: 'idle' | 'roll' | 'settle' | 'held' = 'idle';
+    let rvx = 0.0035, rvy = 0.0052, rvz = 0.0009, settleT = 0, camPush = 0;
+    let coinStartX = 0, coinTargetX = 0, rocketY = 0, rocketTargetY = 0;
     const IDLE_X = 0.0035, IDLE_Y = 0.0052, IDLE_Z = 0.0009;
-    const Core = {
-      agent(hexNum: number) { rim.color.set(hexNum); arc.material.color.set(hexNum); arc.material.emissive.set(hexNum); dieMats.forEach((m) => m.emissive.set(hexNum)); },
-      commit() { target = 1; },
-      reveal() { rvx = 0.30; rvy = 0.36; rvz = 0.14; },          // a real tumble on the roll
-      settle() { target = 0; },
-      win(hexNum: number) { winF = 1; doBurst(hexNum, 1); flashDom(0.55); fieldPulse(); },
+    const AXIS_X = new THREE.Vector3(1, 0, 0), AXIS_Y = new THREE.Vector3(0, 1, 0);
+    const TILT = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.26, 0.4, 0.06));
+    const startQ = new THREE.Quaternion(), targetQ = new THREE.Quaternion(), wobQ = new THREE.Quaternion();
+    // Local face normals: box materials [px,nx,py,ny,pz,nz] = die faces [1,6,2,5,3,4].
+    const faceQuat = (face: number): THREE.Quaternion => {
+      const q = new THREE.Quaternion();
+      if (face === 4) q.setFromAxisAngle(AXIS_Y, Math.PI);
+      else if (face === 1) q.setFromAxisAngle(AXIS_Y, -Math.PI / 2);
+      else if (face === 6) q.setFromAxisAngle(AXIS_Y, Math.PI / 2);
+      else if (face === 2) q.setFromAxisAngle(AXIS_X, Math.PI / 2);
+      else if (face === 5) q.setFromAxisAngle(AXIS_X, -Math.PI / 2);
+      return TILT.clone().multiply(q);
     };
+    const faceForOutcome = (o: string) => (o === 'win' ? 6 : o === 'lose' ? 1 : o === 'tie' ? 3 : o === 'stop' ? 2 : o === 'skip' ? 5 : 4);
+    const warm = new THREE.Color(0xff8a2b);
+
+    // (E) morph the centre to the active game's shape (called at the start of a play)
+    const setHero = (game: string) => {
+      const k = heroTypeFor(game);
+      if (k === heroKey) return;
+      hero.grp.visible = false;
+      heroKey = k; hero = HEROES[k]!; hero.grp.visible = true;
+      hero.grp.position.set(0, 0, 0);
+      hero.grp.rotation.set(-0.2, 0.4, 0.05);
+      hero.grp.quaternion.setFromEuler(hero.grp.rotation);
+      coinGrp.rotation.set(0, 0, 0); rocketGrp.position.y = 0; rocketY = 0; rocketTargetY = 0;
+    };
+
+    const Core = {
+      agent(hexNum: number) {
+        rim.color.set(hexNum); arc.material.color.set(hexNum); arc.material.emissive.set(hexNum);
+        hero.mats.forEach((m) => m.emissive.set(hexNum));
+        fieldMat.uniforms.uColor!.value.copy(warm).lerp(new THREE.Color(hexNum), 0.45); // (B)
+      },
+      commit() { target = 1; mode = 'roll'; rvx = 0.24; rvy = 0.30; rvz = 0.12; if (heroKey === 'rocket') rocketTargetY = 0; },
+      reveal(outcome: string) {                                    // (F) push-in + per-hero settle
+        camPush = 1; settleT = 0; mode = 'settle';
+        const win = outcome === 'win';
+        if (heroKey === 'die') { startQ.copy(hero.grp.quaternion); targetQ.copy(faceQuat(faceForOutcome(outcome))); }
+        else if (heroKey === 'coin') { coinStartX = coinGrp.rotation.x; const base = coinStartX + Math.PI * 8; coinTargetX = base - (base % (Math.PI * 2)) + (win ? 0 : Math.PI); }
+        else if (heroKey === 'rocket') { rocketTargetY = win ? 1.7 : 0.35; }
+      },
+      settle() { target = 0; },
+      win(hexNum: number, big = false) { winF = big ? 1.7 : 1; doBurst(hexNum, big ? 1.7 : 1); flashDom(big ? 0.9 : 0.55); fieldPulse(); },
+    };
+
     const tick = (t: number) => {
       if (stopped) return;
       raf = requestAnimationFrame(tick);
       charge += (target - charge) * 0.08;
-      grp.rotation.x += rvx; grp.rotation.y += rvy; grp.rotation.z += rvz;
-      rvx += (IDLE_X - rvx) * 0.035; rvy += (IDLE_Y - rvy) * 0.035; rvz += (IDLE_Z - rvz) * 0.035;
-      grp.position.y = Math.sin(t * 0.0009) * 0.06;
-      const ei = 0.22 + charge * 1.4 + winF * 2.6;
-      dieMats.forEach((m) => (m.emissiveIntensity = ei));
+      const g = hero.grp;
+      if (heroKey === 'die') {
+        if (mode === 'roll' || mode === 'idle') {
+          g.rotation.x += rvx; g.rotation.y += rvy; g.rotation.z += rvz;
+          rvx += (IDLE_X - rvx) * 0.03; rvy += (IDLE_Y - rvy) * 0.03; rvz += (IDLE_Z - rvz) * 0.03;
+        } else if (mode === 'settle') {
+          settleT = Math.min(1, settleT + 0.022);
+          g.quaternion.slerpQuaternions(startQ, targetQ, 1 - Math.pow(1 - settleT, 3));
+          if (settleT >= 1) mode = 'held';
+        } else {
+          wobQ.setFromEuler(new THREE.Euler(Math.sin(t * 0.001) * 0.03, Math.cos(t * 0.0012) * 0.03, 0));
+          g.quaternion.copy(targetQ).multiply(wobQ);
+        }
+        g.position.y = Math.sin(t * 0.0009) * 0.06;
+      } else if (heroKey === 'coin') {
+        g.rotation.y += 0.004;
+        if (mode === 'roll' || mode === 'idle') coinGrp.rotation.x += (mode === 'roll' ? 0.42 : 0.02);
+        else if (mode === 'settle') {
+          settleT = Math.min(1, settleT + 0.02);
+          coinGrp.rotation.x = coinStartX + (coinTargetX - coinStartX) * (1 - Math.pow(1 - settleT, 3));
+          if (settleT >= 1) mode = 'held';
+        }
+        g.position.y = Math.sin(t * 0.0009) * 0.06;
+      } else if (heroKey === 'rocket') {
+        g.rotation.y += 0.01;
+        g.position.x = mode === 'roll' ? Math.sin(t * 0.05) * 0.03 : 0;
+        if (mode === 'settle') { settleT = Math.min(1, settleT + 0.02); rocketY += (rocketTargetY - rocketY) * 0.12; if (settleT >= 1) mode = 'held'; }
+        else if (mode === 'held') rocketY += (rocketTargetY - rocketY) * 0.08;
+        else rocketY += (0 - rocketY) * 0.1;
+        g.position.y = rocketY + Math.sin(t * 0.001) * 0.05;
+        // exhaust flame: firing hard on launch, a flickering pilot flame at rest
+        const firing = mode === 'roll' || mode === 'settle' ? 1 : 0.45;
+        const flick = 0.82 + Math.sin(t * 0.045) * 0.13 + Math.sin(t * 0.13) * 0.07;
+        flameGrp.scale.set(1, firing * flick, 1);
+        flameOuterMat.opacity = (0.35 + firing * 0.4) * flick;
+        flameInnerMat.opacity = (0.5 + firing * 0.4) * flick;
+      } else { // gem
+        const spin = mode === 'roll' ? 0.06 : mode === 'settle' ? 0.02 : 0.008;
+        g.rotation.x += spin * 0.7; g.rotation.y += spin;
+        if (mode === 'settle') { settleT = Math.min(1, settleT + 0.02); if (settleT >= 1) mode = 'held'; }
+        g.scale.setScalar(1 + winF * 0.14);
+        g.position.y = Math.sin(t * 0.0009) * 0.06;
+      }
+      const ei = (0.22 + charge * 1.4 + winF * 2.6) * (hero.glow ?? 1);
+      hero.mats.forEach((m) => (m.emissiveIntensity = ei));
       arc.material.emissiveIntensity = 0.8 + charge * 1.6 + winF * 2.4;
       rim.intensity = 2.2 + charge * 3.6 + winF * 6;
       winF *= 0.93; if (winF < 0.01) winF = 0;
+      camPush *= 0.95; if (camPush < 0.01) camPush = 0;
       fieldMat.uniforms.uTime!.value = t * 0.001;
       fieldMat.uniforms.uPulse!.value *= 0.94;
       if (burstLife > 0) {
@@ -226,8 +391,10 @@ export default function Arena() {
       }
       camera.position.x += (Math.sin(t * 0.00009) * 0.5 + mx * 0.5 - camera.position.x) * 0.04;
       camera.position.y += (1.15 + my * 0.3 - camera.position.y) * 0.04;
+      camera.position.z += (5.4 - camPush * 1.25 - camera.position.z) * 0.06; // (F) dolly in on reveal
       camera.lookAt(0, 0.12, 0);
-      renderer.render(scene, camera);
+      if (bloom) bloom.strength = 0.58 + charge * 0.28 + winF * 0.7; // (D) bloom swells on charge/win
+      if (composer) composer.render(); else renderer.render(scene, camera);
     };
     raf = requestAnimationFrame(tick);
 
@@ -327,6 +494,7 @@ export default function Arena() {
     };
     async function playOne(p: Play) {
       const sm = styleOf(p.style);
+      setHero(p.game); // (E) morph the centre to this game's shape
       setActing(p.name, sm.css); Core.agent(sm.hex);
       q('nowCrest').innerHTML = crestOf(p.style, sm.css);
       q('nowName').textContent = `@${p.name}`;
@@ -345,7 +513,7 @@ export default function Arena() {
       const oc = q('oc'); oc.className = 'a3-oc'; q('res').textContent = '—'; q('amt').textContent = '';
       await wait(820); if (stopped) return;
 
-      phase.textContent = 'reveal'; Core.reveal();
+      phase.textContent = 'reveal'; Core.reveal(p.outcome); sfx.bet(); // (E) per-hero settle + (C) soft roll tick
       q('revealH').innerHTML = `secret <b style="color:var(--a3-dim)">${secret.slice(0, 12)}…</b> · nonce <b style="color:var(--a3-dim)">${nonce}</b>`;
       rev.classList.add('a3-open');
       const check = await sha256(`${secret}:${nonce}`);
@@ -357,7 +525,7 @@ export default function Arena() {
       const win = p.outcome === 'win', lose = p.outcome === 'lose';
       if (win) {
         oc.className = 'a3-oc a3-win'; q('res').textContent = 'WIN'; q('amt').textContent = `bet ${p.bet}`;
-        pushFeed('▲', `@${p.name}`, `won ${p.game}`, `+ ${p.game}`, 'a3-win'); Core.win(sm.hex); celebrate('a3-win', 'Win', `@${p.name} · ${p.game}`);
+        pushFeed('▲', `@${p.name}`, `won ${p.game}`, `+ ${p.game}`, 'a3-win'); Core.win(sm.hex); sfx.win(); celebrate('a3-win', 'Win', `@${p.name} · ${p.game}`);
       } else if (lose) {
         oc.className = 'a3-oc a3-lose'; q('res').textContent = 'LOSS'; q('amt').textContent = `bet ${p.bet}`;
         pushFeed('▽', `@${p.name}`, `lost ${p.game}`, `− ${p.bet}`, 'a3-lose');
@@ -402,8 +570,9 @@ export default function Arena() {
       clearInterval(pollId);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('resize', onResize);
+      composer?.dispose();
       renderer.dispose();
-      env.dispose(); dieTex.forEach((t) => t.dispose());
+      env.dispose(); dieTex.forEach((t) => t.dispose()); coinFaceTex.dispose();
       scene.traverse((o) => {
         const m = o as THREE.Mesh;
         if (m.geometry) m.geometry.dispose();
@@ -435,6 +604,14 @@ export default function Arena() {
             </div>
           </div>
           <div className="a3-tr">
+            <button className="a3-mute" onClick={toggleMute} aria-label={muted ? 'unmute' : 'mute'} title={muted ? 'unmute sounds' : 'mute sounds'}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M4 9 v6 h4 l5 4 V5 L8 9 Z" fill="currentColor" />
+                {muted
+                  ? <path d="M16 9 l5 6 M21 9 l-5 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  : <><path d="M15.5 9.5 a4 4 0 0 1 0 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /><path d="M18 7.5 a7.5 7.5 0 0 1 0 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></>}
+              </svg>
+            </button>
             <a className="a3-back" href="/" onClick={(e) => { e.preventDefault(); go('/'); }}>‹ back to the arcade</a>
             <span className="a3-live"><span className="a3-d" /> live · testnet2</span>
             <div className="a3-prize">

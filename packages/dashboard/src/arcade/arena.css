@@ -55,6 +55,10 @@
   padding: 7px 13px; border-radius: 100px; border: 1px solid var(--a3-line); background: var(--a3-glass);
   text-decoration: none; transition: color .2s, border-color .2s; }
 .a3-back:hover { color: var(--text-primary); border-color: var(--a3-line2); }
+.a3-mute { display: inline-grid; place-items: center; width: 34px; height: 34px; pointer-events: auto; cursor: pointer;
+  color: var(--a3-dim); border-radius: 100px; border: 1px solid var(--a3-line); background: var(--a3-glass);
+  transition: color .2s, border-color .2s; }
+.a3-mute:hover { color: var(--text-primary); border-color: var(--a3-line2); }
 .a3-live { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 10.5px;
   letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-secondary); padding: 7px 13px; border-radius: 100px;
   border: 1px solid var(--a3-line2); background: rgba(255,111,0,0.07); }
