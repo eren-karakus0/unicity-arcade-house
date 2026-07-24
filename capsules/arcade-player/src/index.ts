@@ -43,6 +43,9 @@ interface Persona {
   /** Per-persona bet ceiling; always <= the global MAX_BET code clamp. */
   maxBet: number;
   rounds: number;
+  /** The games this persona plays — its strategist only ever picks from here.
+   *  Gives the league natural game variety (each persona has its own repertoire). */
+  games: readonly GameId[];
 }
 
 const PERSONAS: readonly Persona[] = [
@@ -52,6 +55,7 @@ const PERSONAS: readonly Persona[] = [
     style: "balanced: mix games, moderate stakes, stop when the session turns clearly bad",
     maxBet: 2,
     rounds: 2,
+    games: ["dice", "wheel", "plinko"],
   },
   {
     identity: "@astrid-daredevil",
@@ -59,6 +63,7 @@ const PERSONAS: readonly Persona[] = [
     style: "aggressive: chase the biggest multipliers and the jackpot, bet at your ceiling",
     maxBet: 3,
     rounds: 2,
+    games: ["crash", "limbo", "number"],
   },
   {
     identity: "@astrid-steady",
@@ -66,6 +71,7 @@ const PERSONAS: readonly Persona[] = [
     style: "cautious: protect the bankroll, prefer the highest win-probability games, minimum bets, stop early after losses",
     maxBet: 1,
     rounds: 2,
+    games: ["coin", "highlow", "rps"],
   },
 ] as const;
 
@@ -143,7 +149,7 @@ function pick<T>(arr: readonly T[]): T {
   return arr[rnd() % arr.length]!;
 }
 
-const GAMES = ["rps", "wheel", "plinko", "dice", "coin", "highlow", "number"] as const;
+const GAMES = ["rps", "wheel", "plinko", "dice", "coin", "highlow", "number", "crash", "limbo"] as const;
 type GameId = (typeof GAMES)[number];
 
 const CHOOSE: Record<GameId, () => unknown> = {
@@ -154,6 +160,9 @@ const CHOOSE: Record<GameId, () => unknown> = {
   dice: () => clientSeed(),
   wheel: () => clientSeed(),
   plinko: () => clientSeed(),
+  // Target-multiplier games: name a modest cash-out and ride the sealed curve.
+  crash: () => ({ target: Number((1.5 + (rnd() % 13) / 10).toFixed(2)), seed: clientSeed() }),
+  limbo: () => ({ target: Number((1.5 + (rnd() % 18) / 10).toFixed(2)), seed: clientSeed() }),
 };
 
 /* ------------------------------------------------------------------ */
@@ -325,8 +334,21 @@ interface RoundBrief {
   rewardUct: number;
 }
 
-function entropyDecision(): Decision {
-  return { game: pick(GAMES), bet: 1, stop: false, reason: "entropy pick", source: "entropy" };
+/** Short menu line per game for the strategist prompt (multiplier + rough odds). */
+const GAME_INFO: Record<GameId, string> = {
+  rps: "rps x2 ~1/3 (ties push)",
+  coin: "coin x2 1/2",
+  highlow: "highlow x2 ~1/2",
+  dice: "dice x2 ~15/36",
+  wheel: "wheel x2 ~5/12",
+  plinko: "plinko x2..x4 mixed",
+  number: "number x5 1/6",
+  crash: "crash: pick a cash-out multiplier (higher = rarer)",
+  limbo: "limbo: name a target multiplier (higher = rarer)",
+};
+
+function entropyDecision(games: readonly GameId[]): Decision {
+  return { game: pick(games), bet: 1, stop: false, reason: "entropy pick", source: "entropy" };
 }
 
 /** Ask Gemini for the next move. Returns null on any failure (caller falls back). */
@@ -338,6 +360,8 @@ function llmDecide(state: {
   /** Persona flavor + per-persona bet ceiling (league play). */
   style?: string;
   maxBet?: number;
+  /** The persona's game repertoire — the only games it may pick from. */
+  games: readonly GameId[];
 }): Decision | null {
   // Runtime config first (future kernels), then the build-time baked key —
   // on astrid 0.9.4 get-config returns none for EVERY key (UPSTREAM.md
@@ -345,17 +369,17 @@ function llmDecide(state: {
   const key = env.get("GEMINI_API_KEY") || LOCAL_GEMINI_KEY;
   if (!key) return null;
   const betCap = Math.min(MAX_BET, Math.max(1, state.maxBet ?? MAX_BET));
+  const menu = state.games.map((g) => GAME_INFO[g]).join(", ");
   const prompt = [
     "You are the strategist for an autonomous player at a provably-fair arcade.",
     ...(state.style ? [`Your persona: ${state.style}. Stay in character.`] : []),
-    "Games (multiplier on win, rough win odds): rps x2 ~1/3 (ties push), coin x2 1/2,",
-    "highlow x2 ~1/2, dice x2 ~15/36, wheel x2 ~5/12, plinko x2..x4 mixed, number x5 1/6.",
+    `Your games (multiplier on win, rough win odds): ${menu}.`,
     "Every round also rolls a side jackpot. You cannot influence outcomes - they are",
     "committed before your choice. Choose the next move; stop early if the session",
     `has gone badly. Balance: ${state.balance} UCT. Jackpot pot: ${state.jackpotUct ?? "?"} UCT.`,
     `Rounds left in this session: ${state.roundsLeft}.`,
     `History this session: ${state.history.length === 0 ? "(none yet)" : JSON.stringify(state.history)}.`,
-    'Reply with ONLY this JSON: {"game":"rps|wheel|plinko|dice|coin|highlow|number",',
+    `Reply with ONLY this JSON: {"game":"${state.games.join("|")}",`,
     `"bet":1-${betCap},"stop":true|false,"reason":"<one short sentence>"}`,
   ].join("\n");
   try {
@@ -400,9 +424,9 @@ function llmDecide(state: {
       stop?: unknown;
       reason?: unknown;
     };
-    // Hard limits live HERE, not in the prompt: validate the game against the
-    // known menu, clamp the bet to [1, betCap] and never above the balance.
-    const game = (GAMES as readonly string[]).includes(String(parsed.game)) ? (String(parsed.game) as GameId) : null;
+    // Hard limits live HERE, not in the prompt: validate the game against THIS
+    // persona's repertoire, clamp the bet to [1, betCap] and never above balance.
+    const game = (state.games as readonly string[]).includes(String(parsed.game)) ? (String(parsed.game) as GameId) : null;
     if (!game) return null;
     const bet = Math.min(Math.max(1, Math.floor(Number(parsed.bet) || 1)), betCap, Math.max(1, state.balance));
     return {
@@ -426,8 +450,9 @@ function decideNext(state: {
   history: RoundBrief[];
   style?: string;
   maxBet?: number;
+  games: readonly GameId[];
 }): Decision {
-  return llmDecide(state) ?? entropyDecision();
+  return llmDecide(state) ?? entropyDecision(state.games);
 }
 
 /* ------------------------------------------------------------------ */
@@ -601,6 +626,7 @@ export class ArcadePlayer {
           jackpotUct,
           roundsLeft: n - i,
           history,
+          games: GAMES,
         });
         if (d.source === "llm") llmUsed = true;
         log.info(
@@ -825,6 +851,7 @@ function playPersonaSession(
       history,
       style: p.style,
       maxBet: p.maxBet,
+      games: p.games,
     });
     if (d.source === "llm") llmUsed = true;
     log.info(
