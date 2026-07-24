@@ -3129,6 +3129,60 @@ button.arcade__chip--motionon { color: var(--accent); border-style: solid; }
 }
 .astrid__arenacta-go { margin-left: auto; color: var(--accent); font-size: 16px; }
 
+/* ---- Compact bot-league TEASER (drives to the /arena showcase) ---- */
+.astrid--teaser { display: flex; flex-direction: column; }
+.astrid__tzr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 4px;
+}
+.astrid__tzr-agents { display: flex; flex-wrap: wrap; gap: 7px; }
+.astrid__tzr-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  white-space: nowrap;
+}
+.astrid__tzr-icon { color: var(--accent); font-size: 13px; }
+.astrid__tzr-think {
+  flex: 1 1 240px;
+  min-width: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  padding: 9px 13px;
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border);
+}
+.astrid__tzr-think b { color: var(--accent); font-weight: 600; }
+.astrid__arenacta--hero {
+  margin: 12px 0 0;
+  padding: 14px 18px;
+  font-size: 14.5px;
+  background: linear-gradient(100deg, rgba(255, 111, 0, 0.22), rgba(255, 111, 0, 0.05) 72%);
+}
+.astrid__arenacta--hero .astrid__arenacta-play { width: 28px; height: 28px; font-size: 11px; }
+.astrid__tzr-note {
+  margin: 11px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.astrid__tzr-note b { color: var(--text-secondary); font-weight: 600; }
+.astrid__tzr-note a { color: var(--accent); text-decoration: none; }
+.astrid__tzr-note a:hover { text-decoration: underline; }
+
 /* fallback shown while the lazy arena chunk (Three.js) loads */
 .arena-boot {
   position: fixed;
