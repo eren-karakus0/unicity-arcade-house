@@ -265,11 +265,12 @@ const RETRY_MAX_MS = 30 * 60_000;
 const MINT_COOLDOWN_MS = 5 * 60_000;
 
 /**
- * The last attempt failed because the winner has no on-chain identity to
- * receive with — nothing the house can do until they publish one.
+ * The chain refused the recipient outright: they have no published identity to
+ * receive with. Unlike a transient failure this cannot come good by retrying —
+ * the house's own bot personas are labels with no wallet behind them at all.
  */
-function isUndeliverable(p: PendingPrize): boolean {
-  return p.lastError !== undefined && /no published chain pubkey/i.test(p.lastError);
+function isUnreachableRecipient(error: string | undefined): boolean {
+  return error !== undefined && /no published chain pubkey/i.test(error);
 }
 
 function isInsufficientBalance(e: unknown): boolean {
@@ -892,6 +893,14 @@ export class GameDealer {
     }
   }
 
+  /** Credit an amount to a player's in-house balance (their chips). */
+  private creditHouseBalance(address: string, amount: number, name: string): void {
+    const key = this.keyFor(address);
+    const state = this.players.get(key) ?? newPlayerState();
+    this.players.set(key, { ...state, chips: state.chips + amount });
+    this.creditEarned(name, amount);
+  }
+
   /** Send one owed prize on-chain; drop it on landing, keep + note it on failure. */
   private payPrize(p: PendingPrize): void {
     if (this.payingPrizes.has(p.id)) return; // a send for this prize is already in flight
@@ -905,6 +914,17 @@ export class GameDealer {
       p.name,
       p.game ?? 'tournament',
       (error) => {
+        if (isUnreachableRecipient(error)) {
+          // The winner has no on-chain identity, so this prize can never land -
+          // retrying it forever only fills the ledger with sends that cannot
+          // succeed and starves the ones that can. Settle it as house credit
+          // instead: real for the winner, who plays on with it.
+          this.creditHouseBalance(p.address, p.amount, p.name);
+          this.log.info(`prize ${p.id}: @${p.name} cannot receive on-chain — credited ${p.amount} UCT in-house`);
+          this.pendingPrizes.delete(p.id);
+          this.payingPrizes.delete(p.id);
+          return;
+        }
         // Keep it pending for the next retry; record why it failed (surfaced in houseStats).
         const cur = this.pendingPrizes.get(p.id);
         if (cur) this.pendingPrizes.set(p.id, { ...cur, tries: cur.tries + 1, ...(error ? { lastError: error } : {}) });
@@ -939,12 +959,6 @@ export class GameDealer {
       const backoff = Math.min(RETRY_BASE_MS * 2 ** Math.min(p.tries, 8), RETRY_MAX_MS);
       return now - p.lastTryAt >= backoff;
     });
-    // A prize whose winner has no on-chain identity cannot be delivered however
-    // often it is tried, and the ledger is ordered oldest-first — so a run of
-    // them at the head would take every slot in the slice and keep payable
-    // prizes waiting behind winners who cannot receive. Try those last; they
-    // stay owed, and settle by themselves once the winner publishes.
-    due.sort((a, b) => Number(isUndeliverable(a)) - Number(isUndeliverable(b)));
     for (const p of due.slice(0, limit)) this.payPrize(p);
   }
 

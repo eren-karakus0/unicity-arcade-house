@@ -700,12 +700,12 @@ describe('tournament — dealer wiring', () => {
     expect((await dealer.houseStats()).paidOutUct).toBeGreaterThan(0);
   });
 
-  it('tries winners who can receive before ones who cannot', async () => {
-    // The ledger is oldest-first. A run of prizes owed to winners with no
-    // on-chain identity sits at the head, and a sweep only takes a slice - so
-    // without ordering they would take every slot and the payable prize behind
-    // them would never be attempted.
-    const tried: string[] = [];
+  it('settles a prize in-house when the winner has no on-chain identity', async () => {
+    // The house's own bot personas are labels with no wallet behind them, so an
+    // on-chain prize addressed to one can never land however often it is tried.
+    // Left pending it would clog the ledger forever - which is exactly what a
+    // real backlog did. It becomes house credit instead: real for the winner.
+    let attempts = 0;
     const agent = {
       nametag: 'house-test',
       uctCoin: { coinId: 'aabb', decimals: 2 },
@@ -713,33 +713,30 @@ describe('tournament — dealer wiring', () => {
       balanceUct: async () => 1000,
       mintUct: async () => undefined,
       send: async (address: string) => {
-        tried.push(address);
+        attempts += 1;
         throw new Error(`Recipient ${address} has no published chain pubkey`);
       },
     } as unknown as SphereAgent;
     const dealer = new GameDealer({ agent, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1 });
 
-    // Three owed prizes: two to winners that cannot receive, then a payable one.
-    for (const who of ['@ghost1', '@ghost2', '@payable']) {
-      const nr = dealer.newRound('coin', who);
-      await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: who, name: who.slice(1) });
-      await dealer.flushPayouts();
-    }
-    // Only the two ghosts carry the undeliverable error; clear the third's.
-    const owed = dealer.snapshot().pendingPrizes;
-    expect(owed.length).toBe(3);
-    const fresh = new GameDealer({ agent, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1 });
-    fresh.restore({
-      ...dealer.snapshot(),
-      pendingPrizes: owed.map((p) =>
-        p.address === '@payable' ? { ...p, lastError: 'Insufficient balance for this transaction' } : p,
-      ),
+    const before = dealer.balanceOf('@astrid-steady').balanceUct;
+    const nr = dealer.newRound('coin', '@astrid-steady');
+    const res = await dealer.play({
+      roundId: nr.roundId,
+      choice: 'heads',
+      playerAddress: '@astrid-steady',
+      name: 'astrid-steady',
     });
+    expect(res.jackpot.hit).toBe(true);
+    await dealer.flushPayouts();
 
-    tried.length = 0;
-    fresh.retryPendingPrizes({ limit: 1 });
-    await fresh.flushPayouts();
-    expect(tried).toEqual(['@payable']);
+    // Retired from the ledger, credited in-house, and never retried again.
+    expect((await dealer.houseStats()).pendingPrizes).toHaveLength(0);
+    expect(dealer.balanceOf('@astrid-steady').balanceUct).toBeGreaterThan(before);
+    const settled = attempts;
+    dealer.retryPendingPrizes();
+    await dealer.flushPayouts();
+    expect(attempts).toBe(settled);
   });
 
   it('holds an owed prize back until its backoff elapses, but never on a boot sweep', async () => {
