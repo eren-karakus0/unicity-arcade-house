@@ -700,6 +700,48 @@ describe('tournament — dealer wiring', () => {
     expect((await dealer.houseStats()).paidOutUct).toBeGreaterThan(0);
   });
 
+  it('tries winners who can receive before ones who cannot', async () => {
+    // The ledger is oldest-first. A run of prizes owed to winners with no
+    // on-chain identity sits at the head, and a sweep only takes a slice - so
+    // without ordering they would take every slot and the payable prize behind
+    // them would never be attempted.
+    const tried: string[] = [];
+    const agent = {
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async (address: string) => {
+        tried.push(address);
+        throw new Error(`Recipient ${address} has no published chain pubkey`);
+      },
+    } as unknown as SphereAgent;
+    const dealer = new GameDealer({ agent, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1 });
+
+    // Three owed prizes: two to winners that cannot receive, then a payable one.
+    for (const who of ['@ghost1', '@ghost2', '@payable']) {
+      const nr = dealer.newRound('coin', who);
+      await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: who, name: who.slice(1) });
+      await dealer.flushPayouts();
+    }
+    // Only the two ghosts carry the undeliverable error; clear the third's.
+    const owed = dealer.snapshot().pendingPrizes;
+    expect(owed.length).toBe(3);
+    const fresh = new GameDealer({ agent, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1 });
+    fresh.restore({
+      ...dealer.snapshot(),
+      pendingPrizes: owed.map((p) =>
+        p.address === '@payable' ? { ...p, lastError: 'Insufficient balance for this transaction' } : p,
+      ),
+    });
+
+    tried.length = 0;
+    fresh.retryPendingPrizes({ limit: 1 });
+    await fresh.flushPayouts();
+    expect(tried).toEqual(['@payable']);
+  });
+
   it('holds an owed prize back until its backoff elapses, but never on a boot sweep', async () => {
     let live = false;
     const attempts: number[] = [];

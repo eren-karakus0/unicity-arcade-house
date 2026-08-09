@@ -264,6 +264,14 @@ const RETRY_MAX_MS = 30 * 60_000;
 /** Least time between float top-ups, so a backlog cannot mint once per prize. */
 const MINT_COOLDOWN_MS = 5 * 60_000;
 
+/**
+ * The last attempt failed because the winner has no on-chain identity to
+ * receive with — nothing the house can do until they publish one.
+ */
+function isUndeliverable(p: PendingPrize): boolean {
+  return p.lastError !== undefined && /no published chain pubkey/i.test(p.lastError);
+}
+
 function isInsufficientBalance(e: unknown): boolean {
   const err = e as { code?: unknown; message?: unknown } | null;
   return (
@@ -925,17 +933,19 @@ export class GameDealer {
   retryPendingPrizes(opts: { limit?: number; respectBackoff?: boolean } = {}): void {
     const { limit = 10, respectBackoff = false } = opts;
     const now = Date.now();
-    let attempted = 0;
-    for (const p of this.pendingPrizes.values()) {
-      if (attempted >= limit) break;
-      if (this.payingPrizes.has(p.id)) continue;
-      if (respectBackoff && p.lastTryAt !== undefined) {
-        const backoff = Math.min(RETRY_BASE_MS * 2 ** Math.min(p.tries, 8), RETRY_MAX_MS);
-        if (now - p.lastTryAt < backoff) continue;
-      }
-      attempted += 1;
-      this.payPrize(p);
-    }
+    const due = [...this.pendingPrizes.values()].filter((p) => {
+      if (this.payingPrizes.has(p.id)) return false;
+      if (!respectBackoff || p.lastTryAt === undefined) return true;
+      const backoff = Math.min(RETRY_BASE_MS * 2 ** Math.min(p.tries, 8), RETRY_MAX_MS);
+      return now - p.lastTryAt >= backoff;
+    });
+    // A prize whose winner has no on-chain identity cannot be delivered however
+    // often it is tried, and the ledger is ordered oldest-first — so a run of
+    // them at the head would take every slot in the slice and keep payable
+    // prizes waiting behind winners who cannot receive. Try those last; they
+    // stay owed, and settle by themselves once the winner publishes.
+    due.sort((a, b) => Number(isUndeliverable(a)) - Number(isUndeliverable(b)));
+    for (const p of due.slice(0, limit)) this.payPrize(p);
   }
 
   /** The player's in-house UCT balance. */
@@ -1146,9 +1156,16 @@ export class GameDealer {
           this.lastMintAt = now;
           const top = Math.max(this.mintAmount, Math.ceil(amount + 10));
           this.log.warn(`payout of ${amount} UCT found no spendable tokens — minting ${top} to restore the float`);
-          await this.agent.mintUct(top);
-          this.minted += top;
-          this.pushEvent({ kind: 'mint', at: now, amountUct: top });
+          // Check the result: a mint reports failure in its payload rather than
+          // throwing, so ignoring it would credit a top-up that never happened
+          // and leave the house quietly unable to pay anything.
+          const res = await this.agent.mintUct(top);
+          if (res?.success === false) {
+            this.log.error(`float top-up of ${top} UCT failed: ${res.error ?? 'unknown error'}`);
+          } else {
+            this.minted += top;
+            this.pushEvent({ kind: 'mint', at: now, amountUct: top });
+          }
         }
         throw e;
       }
