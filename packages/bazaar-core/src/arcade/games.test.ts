@@ -700,6 +700,47 @@ describe('tournament — dealer wiring', () => {
     expect((await dealer.houseStats()).paidOutUct).toBeGreaterThan(0);
   });
 
+  it('does not let one payout that never settles block every later one', async () => {
+    // Payouts run in sequence so they never contend for the same tokens, which
+    // means a single call that never resolves takes the whole house down with
+    // it: in production one hung send stopped every payout for an hour, with no
+    // error and no further attempts, until a restart. It must time out instead.
+    let hang = true;
+    const landed: number[] = [];
+    const agent = {
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async (_address: string, amount: number) => {
+        if (hang) await new Promise(() => {}); // never settles
+        landed.push(amount);
+        return { id: `tx-${amount}`, deliveryState: 'landed' };
+      },
+    } as unknown as SphereAgent;
+    // A deadline far below the real one keeps the test fast.
+    const dealer = new GameDealer({
+      agent,
+      cooldownMs: 0,
+      jackpotSeedUct: 20,
+      jackpotOdds: 1,
+      payoutTimeoutMs: 40,
+    });
+
+    const first = dealer.newRound('coin', '@a');
+    await dealer.play({ roundId: first.roundId, choice: 'heads', playerAddress: '@a', name: 'a' });
+
+    // The hung payout releases the lock once its deadline passes.
+    await new Promise((r) => setTimeout(r, 120));
+    hang = false;
+    dealer.retryPendingPrizes();
+    await dealer.flushPayouts();
+
+    expect(landed.length).toBeGreaterThan(0);
+    expect((await dealer.houseStats()).pendingPrizes).toHaveLength(0);
+  });
+
   it('settles a prize in-house when the winner has no on-chain identity', async () => {
     // The house's own bot personas are labels with no wallet behind them, so an
     // on-chain prize addressed to one can never land however often it is tried.

@@ -36,6 +36,8 @@ export interface GameDealerOptions {
   minTreasuryUct?: number;
   /** Amount minted when topping up (default 50). */
   mintUct?: number;
+  /** How long one payout may hold the payment lock (default 2 min). */
+  payoutTimeoutMs?: number;
   /** Unplayed rounds expire after this (default 2 min). */
   roundTtlMs?: number;
   /** Minimum gap between rounds from the same address (default 0.8s). */
@@ -263,6 +265,14 @@ const RETRY_BASE_MS = 60_000;
 const RETRY_MAX_MS = 30 * 60_000;
 /** Least time between float top-ups, so a backlog cannot mint once per prize. */
 const MINT_COOLDOWN_MS = 5 * 60_000;
+/**
+ * How long one payout may hold the payment lock. Payouts run in sequence so
+ * they never contend for the same tokens, which also means a single call that
+ * never settles takes every future payout down with it — the house simply stops
+ * paying, silently, until someone restarts it. Generous enough that a slow but
+ * healthy settlement is never cut short.
+ */
+const PAYOUT_TIMEOUT_MS = 120_000;
 
 /**
  * The chain refused the recipient outright: they have no published identity to
@@ -271,6 +281,21 @@ const MINT_COOLDOWN_MS = 5 * 60_000;
  */
 function isUnreachableRecipient(error: string | undefined): boolean {
   return error !== undefined && /no published chain pubkey/i.test(error);
+}
+
+/** Reject if `p` has not settled within `ms`; the underlying work is left running. */
+async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`payout did not settle within ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function isInsufficientBalance(e: unknown): boolean {
@@ -360,6 +385,7 @@ export class GameDealer {
   private readonly baseReward: number;
   private readonly minTreasury: number;
   private readonly mintAmount: number;
+  private readonly payoutTimeout: number;
   private readonly ttl: number;
   private readonly cooldown: number;
   private readonly jackpotSeed: number;
@@ -401,6 +427,7 @@ export class GameDealer {
     this.baseReward = opts.baseRewardUct ?? 1;
     this.minTreasury = opts.minTreasuryUct ?? 10;
     this.mintAmount = opts.mintUct ?? 50;
+    this.payoutTimeout = opts.payoutTimeoutMs ?? PAYOUT_TIMEOUT_MS;
     this.ttl = opts.roundTtlMs ?? 120_000;
     this.cooldown = opts.cooldownMs ?? 800;
     this.jackpotSeed = opts.jackpotSeedUct ?? 20;
@@ -1147,7 +1174,22 @@ export class GameDealer {
 
   /** Serialize house sends so concurrent wins never race on coin selection. */
   private payout(address: string, amount: number, memo = 'arcade-win'): Promise<TxLike> {
-    const run = this.payLock.then(async () => {
+    const run = this.payLock.then(() => withDeadline(this.attemptPayout(address, amount, memo), this.payoutTimeout));
+    this.payLock = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /**
+   * One payout attempt: make sure the treasury can cover it, then send. Runs
+   * under the payment lock, and under a deadline — an abandoned attempt may
+   * still land, which keeps delivery at-least-once (as the pending ledger
+   * already documents) but never wedges every later payout behind it.
+   */
+  private async attemptPayout(address: string, amount: number, memo: string): Promise<TxLike> {
+    {
       await this.ensureTreasuryFor(amount);
       try {
         return (await this.agent.send(address, amount, memo)) as unknown as TxLike;
@@ -1183,12 +1225,7 @@ export class GameDealer {
         }
         throw e;
       }
-    });
-    this.payLock = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+    }
   }
 
   private record(name: string, outcome: Outcome): void {
