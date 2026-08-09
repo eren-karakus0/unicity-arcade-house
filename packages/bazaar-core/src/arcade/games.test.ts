@@ -651,44 +651,53 @@ describe('tournament — dealer wiring', () => {
     expect(after.pendingPrizes).toHaveLength(0);
   });
 
-  it('mints and retries when the treasury reads rich but nothing is spendable', async () => {
+  it('tops the float up once when the treasury reads rich but nothing is spendable', async () => {
     // The wallet reports a healthy confirmed balance while coin selection has
     // no unreserved tokens to draw on. Reading the balance alone, the house
-    // considers itself funded and never tops up, so without the retry every
-    // payout fails forever - the shape that stranded a real prize backlog.
-    let minted = 0;
-    const sent: number[] = [];
+    // considers itself funded and never tops up, so every payout fails forever
+    // - the shape that stranded a real prize backlog. A minted token is not
+    // spendable the moment the mint resolves, so the top-up must NOT rescue
+    // this payout inline: doing that mints again on the next owed prize, and
+    // the next, minting without bound while nothing is ever paid.
+    const mints: number[] = [];
+    let spendable = false;
     const locked = {
       nametag: 'house-test',
       uctCoin: { coinId: 'aabb', decimals: 2 },
       toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
       balanceUct: async () => 1_000_000, // rich on paper
       mintUct: async (amount: number) => {
-        minted += amount;
+        mints.push(amount);
         return undefined;
       },
       send: async (_address: string, amount: number) => {
-        // Only tokens minted in this process are free to spend.
-        if (minted === 0) {
+        if (!spendable) {
           throw Object.assign(new Error('Insufficient balance for this transaction'), {
             code: 'SEND_INSUFFICIENT_BALANCE',
           });
         }
-        sent.push(amount);
-        return { id: `tx-${sent.length}`, deliveryState: 'landed' };
+        return { id: `tx-${amount}`, deliveryState: 'landed' };
       },
     } as unknown as SphereAgent;
 
-    const dealer = new GameDealer({ agent: locked, cooldownMs: 0, jackpotOdds: 1_000_000_000 });
-    dealer.creditDeposit({ id: 'seed-lk', amountBase: '2000', senderPubkey: '@lk' });
-    const co = dealer.cashOut('@lk', 'lk');
+    const dealer = new GameDealer({ agent: locked, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1 });
+    const nr = dealer.newRound('coin', '@lk');
+    await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@lk', name: 'lk' });
     await dealer.flushPayouts();
 
-    // It minted rather than giving up, and the payout actually went out.
-    expect(minted).toBeGreaterThan(0);
-    expect(sent).toContain(co.amountUct);
-    expect(dealer.settlementFor(co.settlementId)).toBeDefined();
-    expect((await dealer.houseStats()).paidOutUct).toBeGreaterThanOrEqual(co.amountUct);
+    // It topped up, the prize stayed owed, and it did not mint per attempt.
+    expect(mints).toHaveLength(1);
+    expect((await dealer.houseStats()).pendingPrizes.length).toBeGreaterThanOrEqual(1);
+    dealer.retryPendingPrizes();
+    await dealer.flushPayouts();
+    expect(mints).toHaveLength(1); // still one - the cooldown holds
+
+    // Once the float has landed, the sweep pays what was owed.
+    spendable = true;
+    dealer.retryPendingPrizes();
+    await dealer.flushPayouts();
+    expect((await dealer.houseStats()).pendingPrizes).toHaveLength(0);
+    expect((await dealer.houseStats()).paidOutUct).toBeGreaterThan(0);
   });
 
   it('holds an owed prize back until its backoff elapses, but never on a boot sweep', async () => {

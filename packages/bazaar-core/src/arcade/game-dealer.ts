@@ -261,6 +261,8 @@ export interface HouseStats {
 /** Retry backoff for an owed prize: doubles per failed try, capped. */
 const RETRY_BASE_MS = 60_000;
 const RETRY_MAX_MS = 30 * 60_000;
+/** Least time between float top-ups, so a backlog cannot mint once per prize. */
+const MINT_COOLDOWN_MS = 5 * 60_000;
 
 function isInsufficientBalance(e: unknown): boolean {
   const err = e as { code?: unknown; message?: unknown } | null;
@@ -364,6 +366,8 @@ export class GameDealer {
   private readonly board = new Map<string, LeaderRow>();
   private readonly players = new Map<string, PlayerState>();
   private payLock: Promise<void> = Promise.resolve();
+  /** When the house last minted a float top-up (see MINT_COOLDOWN_MS). */
+  private lastMintAt = 0;
 
   // House transparency (since last restart).
   private paidOut = 0;
@@ -1128,14 +1132,25 @@ export class GameDealer {
         // A confirmed balance is not a spendable one: coin selection only draws
         // on tokens no other intent holds, so the treasury check above can read
         // healthy while nothing is actually free to spend — and then the house
-        // never tops up, because by its own measure it is rich. Mint (fresh
-        // tokens are unreserved by construction) and try this payout once more.
-        const top = Math.max(this.mintAmount, Math.ceil(amount + 10));
-        this.log.warn(`payout of ${amount} UCT found no spendable tokens — minting ${top} and retrying`);
-        await this.agent.mintUct(top);
-        this.minted += top;
-        this.pushEvent({ kind: 'mint', at: Date.now(), amountUct: top });
-        return (await this.agent.send(address, amount, memo)) as unknown as TxLike;
+        // never tops up, because by its own measure it is rich. Mint to restore
+        // a free float (fresh tokens are unreserved by construction).
+        //
+        // The mint is a top-up for LATER payouts, not a rescue of this one: a
+        // just-minted token is not spendable the instant the mint resolves, so
+        // retrying inline would fail anyway and mint again on the next prize,
+        // and the next — minting without bound while nothing gets paid. This
+        // payout fails honestly and the retry sweep picks it up once the float
+        // has landed. The cooldown keeps a burst of owed prizes to one top-up.
+        const now = Date.now();
+        if (now - this.lastMintAt >= MINT_COOLDOWN_MS) {
+          this.lastMintAt = now;
+          const top = Math.max(this.mintAmount, Math.ceil(amount + 10));
+          this.log.warn(`payout of ${amount} UCT found no spendable tokens — minting ${top} to restore the float`);
+          await this.agent.mintUct(top);
+          this.minted += top;
+          this.pushEvent({ kind: 'mint', at: now, amountUct: top });
+        }
+        throw e;
       }
     });
     this.payLock = run.then(
