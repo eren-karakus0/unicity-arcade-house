@@ -201,9 +201,9 @@ async function boot(): Promise<void> {
   // re-credits recent deposits into the fresh in-memory balances).
   const DEPOSIT_WINDOW_MS = 45 * 60_000;
   const { coinId: uctCoinId } = houseAgent.uctCoin;
-  const sweepDeposits = () => {
+  const sweepDeposits = async () => {
     try {
-      const entries = houseAgent.getHistory() as {
+      const entries = (await houseAgent.getHistory()) as {
         id?: string;
         dedupKey?: string;
         type?: string;
@@ -233,8 +233,8 @@ async function boot(): Promise<void> {
       log.warn('deposit sweep failed', e instanceof Error ? e.message : e);
     }
   };
-  sweepDeposits();
-  setInterval(sweepDeposits, 15_000);
+  void sweepDeposits();
+  setInterval(() => void sweepDeposits(), 15_000);
 
   ready = true;
   log.info(`arcade online — house @${houseAgent.nametag}`);

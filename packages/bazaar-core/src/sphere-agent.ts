@@ -37,8 +37,8 @@ export interface SphereAgentOptions {
  *
  * It performs the two-step v2 provider wiring (base providers + wallet-api
  * rails — the step that silently breaks transfers if skipped), enables the
- * market and swap modules, and exposes the economic primitives our bazaar
- * agents need: mint, send/receive, payment requests, DMs, market intents.
+ * market module, and exposes the economic primitives our bazaar agents need:
+ * mint, send/receive, payment requests, DMs, market intents.
  */
 export class SphereAgent {
   readonly name: string;
@@ -69,10 +69,11 @@ export class SphereAgent {
     // than the rails.
     const network: NetworkType =
       this.opts.network === 'testnet' ? 'testnet2' : (this.opts.network ?? 'testnet2');
+    // No tokensDir: token custody is server-side on the wallet-api rail, so
+    // there is no local token store to point anywhere (SDK 0.14).
     const base = createNodeProviders({
       network,
       dataDir: this.opts.dataDir,
-      tokensDir: path.join(this.opts.dataDir, 'tokens'),
       oracle: { apiKey: this.opts.oracleApiKey },
     });
     const providers = createWalletApiProviders(base, {
@@ -86,9 +87,6 @@ export class SphereAgent {
       network: 'testnet2' as const,
       nametag: this.desiredNametag,
       market: true as const,
-      // Swap requires the accounting (invoice) module — enable both together.
-      accounting: true as const,
-      swap: true as const,
       groupChat: true as const,
     };
     const initOptions = this.opts.mnemonic
@@ -107,7 +105,7 @@ export class SphereAgent {
     }
 
     this.log.info(`ready — @${this.nametag}  addr=${this.directAddress?.slice(0, 24)}…`);
-    this.log.info(`modules: market=${!!sphere.market} swap=${!!sphere.swap} groupChat=${!!sphere.groupChat}`);
+    this.log.info(`modules: market=${!!sphere.market} groupChat=${!!sphere.groupChat}`);
     if (created && generatedMnemonic) {
       // Never print a live mnemonic to stdout/stderr — hosting logs are retained
       // and often exportable. Persist it beside the wallet's own key storage (the
@@ -148,11 +146,12 @@ export class SphereAgent {
   }
 
   // ---- payments ----
-  async mintUct(human: string | number) {
+  /** Mirrors the SDK's MintResult, which the package does not export by name. */
+  async mintUct(human: string | number): Promise<{ success: boolean; tokenId?: string; error?: string }> {
     const amount = parseTokenAmount(String(human), this.uctDecimals);
     const coinIdHex = getCoinIdBySymbol(UCT) ?? this.uctCoinId;
     this.log.info(`self-minting ${human} UCT (coinId ${coinIdHex.slice(0, 10)}…)…`);
-    return this.sphere.payments.mintFungibleToken(coinIdHex, amount);
+    return this.sphere.payments.mint(coinIdHex, amount);
   }
 
   async send(recipient: string, human: string | number, memo?: string) {
@@ -166,8 +165,14 @@ export class SphereAgent {
     });
   }
 
+  /**
+   * Drain the mailbox now. Incoming transfers also land on their own while the
+   * wallet runs; `onTransfer` is delivered through the wallet event stream
+   * (receive() no longer takes a callback) and stays subscribed for those too.
+   */
   async receive(onTransfer?: (t: unknown) => void) {
-    return this.sphere.payments.receive(undefined, onTransfer as never);
+    if (onTransfer) this.sphere.on('transfer:incoming', onTransfer as never);
+    return this.sphere.payments.receive();
   }
 
   /**
@@ -176,14 +181,18 @@ export class SphereAgent {
    * background (receive() callbacks never fire for them), but every delivery
    * lands here as a RECEIVED entry with sender pubkey/nametag + memo.
    */
-  getHistory(): unknown[] {
-    return this.sphere.payments.getHistory();
+  async getHistory(limit = 200): Promise<unknown[]> {
+    // History is paged (SDK 0.14) and the server picks the size when no limit
+    // is given. Ask for a generous page explicitly: callers sweep a recent time
+    // window on a busy wallet, and a small default page could hide arrivals.
+    const page = await this.sphere.payments.history({ limit });
+    return page.entries;
   }
 
   /** Confirmed (spendable) UCT balance, as a human-readable string. */
   async balanceUct(): Promise<string> {
     const uctHex = getCoinIdBySymbol(UCT);
-    const assets = await this.sphere.payments.getAssets();
+    const assets = await this.sphere.payments.assets();
     let total = 0n;
     for (const a of assets) {
       if (a.symbol === UCT || a.coinId === uctHex) {
@@ -194,25 +203,30 @@ export class SphereAgent {
   }
 
   // ---- payment requests ----
+  // These live under payments.requests and report through the wallet event
+  // stream (SDK 0.14). The wrapper keeps its own shape so callers stay put.
   async requestPayment(fromNametag: string, human: string | number, message: string) {
-    return this.sphere.payments.sendPaymentRequest(
+    return this.sphere.payments.requests.create(
       fromNametag.startsWith('@') ? fromNametag : `@${fromNametag}`,
-      {
-        amount: this.toSmallest(human),
-        coinId: this.uctCoinId,
-        recipientNametag: this.nametag.replace(/^@/, ''),
-        message,
-      },
+      { coinId: this.uctCoinId, amount: this.toSmallest(human), memo: message },
     );
   }
-  async payRequest(requestId: string, memo?: string) {
-    return this.sphere.payments.payPaymentRequest(requestId, memo);
+  async payRequest(requestId: string) {
+    return this.sphere.payments.requests.pay(requestId);
   }
   onPaymentRequest(handler: (req: unknown) => void) {
-    return this.sphere.payments.onPaymentRequest(handler as never);
+    return this.sphere.on('payment_request:incoming', handler as never);
   }
+  /**
+   * Settlement updates for requests WE issued. The event reports a lifecycle
+   * `status`; republish it under the `responseType` the bazaar flows match on,
+   * so only a genuinely paid request advances a job.
+   */
   onPaymentRequestResponse(handler: (res: unknown) => void) {
-    return this.sphere.payments.onPaymentRequestResponse(handler as never);
+    return this.sphere.on('payment_request:updated', (e) => {
+      const { id, status } = e as { id: string; status: string };
+      handler({ requestId: id, responseType: status });
+    });
   }
 
   // ---- messaging (Nostr DM) ----
@@ -226,16 +240,11 @@ export class SphereAgent {
     return this.sphere.communications.onDirectMessage(handler as never);
   }
 
-  // ---- market & swap (nullable modules, enabled in start()) ----
+  // ---- market (nullable module, enabled in start()) ----
   get market() {
     const m = this.sphere.market;
     if (!m) throw new Error(`[${this.name}] market module not enabled`);
     return m;
-  }
-  get swap() {
-    const s = this.sphere.swap;
-    if (!s) throw new Error(`[${this.name}] swap module not enabled`);
-    return s;
   }
 
   private normalizeRecipient(recipient: string): string {
