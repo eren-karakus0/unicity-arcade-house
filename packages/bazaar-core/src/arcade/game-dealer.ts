@@ -254,6 +254,23 @@ export interface HouseStats {
 }
 
 /**
+ * Coin selection refused the spend for want of unreserved tokens. Matched on the
+ * SDK's error code, with the message as a fallback so an older/newer wallet that
+ * only carries the text is still recognised.
+ */
+/** Retry backoff for an owed prize: doubles per failed try, capped. */
+const RETRY_BASE_MS = 60_000;
+const RETRY_MAX_MS = 30 * 60_000;
+
+function isInsufficientBalance(e: unknown): boolean {
+  const err = e as { code?: unknown; message?: unknown } | null;
+  return (
+    err?.code === 'SEND_INSUFFICIENT_BALANCE' ||
+    (typeof err?.message === 'string' && err.message.includes('Insufficient balance'))
+  );
+}
+
+/**
  * A tournament prize that has been crowned but not yet confirmed paid on-chain.
  * Persisted so a champion is still paid across a restart — the free-tier host
  * can sleep at the 15-min window boundary, exactly when a window closes, and a
@@ -271,6 +288,8 @@ export interface PendingPrize {
   at: number;
   tries: number;
   lastError?: string;
+  /** When the last send was attempted — drives the retry backoff. */
+  lastTryAt?: number;
   /** Settlement memo — defaults to the tournament payout; jackpots use 'arcade-jackpot'. */
   memo?: string;
   /** Game id for the feed event (tournament prizes have none). */
@@ -865,6 +884,7 @@ export class GameDealer {
   private payPrize(p: PendingPrize): void {
     if (this.payingPrizes.has(p.id)) return; // a send for this prize is already in flight
     this.payingPrizes.add(p.id);
+    this.pendingPrizes.set(p.id, { ...p, lastTryAt: Date.now() });
     this.enqueueSettlement(
       p.id,
       p.address,
@@ -887,12 +907,31 @@ export class GameDealer {
   }
 
   /**
-   * Re-attempt tournament prizes that were crowned but never confirmed on-chain
-   * (the process slept before the send landed). Call once on boot, after
-   * restore() and after the agent is started. Delivery is at-least-once.
+   * Re-attempt prizes that were awarded but never confirmed on-chain (the
+   * process slept before the send landed, or the send failed). Call after
+   * restore() once the agent is started, and then on a timer: a boot-only sweep
+   * strands everything it cannot pay that instant until the next restart, which
+   * is how a backlog builds up in the first place. Delivery is at-least-once.
+   *
+   * A sweep takes only a slice of the queue, so a large backlog drains steadily
+   * instead of replaying every owed prize — against one wallet, in sequence — on
+   * every tick. Timed sweeps also wait out an escalating per-prize backoff;
+   * the boot sweep does not, because a restart is itself new information.
    */
-  retryPendingPrizes(): void {
-    for (const p of this.pendingPrizes.values()) this.payPrize(p);
+  retryPendingPrizes(opts: { limit?: number; respectBackoff?: boolean } = {}): void {
+    const { limit = 10, respectBackoff = false } = opts;
+    const now = Date.now();
+    let attempted = 0;
+    for (const p of this.pendingPrizes.values()) {
+      if (attempted >= limit) break;
+      if (this.payingPrizes.has(p.id)) continue;
+      if (respectBackoff && p.lastTryAt !== undefined) {
+        const backoff = Math.min(RETRY_BASE_MS * 2 ** Math.min(p.tries, 8), RETRY_MAX_MS);
+        if (now - p.lastTryAt < backoff) continue;
+      }
+      attempted += 1;
+      this.payPrize(p);
+    }
   }
 
   /** The player's in-house UCT balance. */
@@ -1082,7 +1121,22 @@ export class GameDealer {
   private payout(address: string, amount: number, memo = 'arcade-win'): Promise<TxLike> {
     const run = this.payLock.then(async () => {
       await this.ensureTreasuryFor(amount);
-      return (await this.agent.send(address, amount, memo)) as unknown as TxLike;
+      try {
+        return (await this.agent.send(address, amount, memo)) as unknown as TxLike;
+      } catch (e) {
+        if (!isInsufficientBalance(e)) throw e;
+        // A confirmed balance is not a spendable one: coin selection only draws
+        // on tokens no other intent holds, so the treasury check above can read
+        // healthy while nothing is actually free to spend — and then the house
+        // never tops up, because by its own measure it is rich. Mint (fresh
+        // tokens are unreserved by construction) and try this payout once more.
+        const top = Math.max(this.mintAmount, Math.ceil(amount + 10));
+        this.log.warn(`payout of ${amount} UCT found no spendable tokens — minting ${top} and retrying`);
+        await this.agent.mintUct(top);
+        this.minted += top;
+        this.pushEvent({ kind: 'mint', at: Date.now(), amountUct: top });
+        return (await this.agent.send(address, amount, memo)) as unknown as TxLike;
+      }
     });
     this.payLock = run.then(
       () => undefined,

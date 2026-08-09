@@ -163,10 +163,14 @@ async function boot(): Promise<void> {
     void sessionStore.save(astridSessions.slice(0, 12));
   };
 
-  // Pay any tournament prizes that were crowned but never confirmed on-chain
-  // before the last shutdown (e.g. the free-tier host slept at the window
-  // boundary). The agent is already started, so these settle in the background.
+  // Pay any prizes that were awarded but never confirmed on-chain before the
+  // last shutdown (e.g. the host slept at a tournament window boundary). The
+  // agent is already started, so these settle in the background. Keep sweeping
+  // on a timer, not just here: anything unpayable at this instant would
+  // otherwise sit owed until the next restart. The dealer applies its own
+  // per-prize backoff and takes a slice at a time.
   dealerRef.retryPendingPrizes();
+  setInterval(() => dealerRef.retryPendingPrizes({ respectBackoff: true }), 60_000);
   // Only write when the snapshot actually changed - idle periods make no writes,
   // so the Neon Postgres instance can auto-suspend (keeps free-tier compute low).
   let lastSaved = '';

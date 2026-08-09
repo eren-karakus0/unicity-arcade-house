@@ -650,6 +650,81 @@ describe('tournament — dealer wiring', () => {
     expect(after.paidOutUct).toBeGreaterThanOrEqual(15);
     expect(after.pendingPrizes).toHaveLength(0);
   });
+
+  it('mints and retries when the treasury reads rich but nothing is spendable', async () => {
+    // The wallet reports a healthy confirmed balance while coin selection has
+    // no unreserved tokens to draw on. Reading the balance alone, the house
+    // considers itself funded and never tops up, so without the retry every
+    // payout fails forever - the shape that stranded a real prize backlog.
+    let minted = 0;
+    const sent: number[] = [];
+    const locked = {
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1_000_000, // rich on paper
+      mintUct: async (amount: number) => {
+        minted += amount;
+        return undefined;
+      },
+      send: async (_address: string, amount: number) => {
+        // Only tokens minted in this process are free to spend.
+        if (minted === 0) {
+          throw Object.assign(new Error('Insufficient balance for this transaction'), {
+            code: 'SEND_INSUFFICIENT_BALANCE',
+          });
+        }
+        sent.push(amount);
+        return { id: `tx-${sent.length}`, deliveryState: 'landed' };
+      },
+    } as unknown as SphereAgent;
+
+    const dealer = new GameDealer({ agent: locked, cooldownMs: 0, jackpotOdds: 1_000_000_000 });
+    dealer.creditDeposit({ id: 'seed-lk', amountBase: '2000', senderPubkey: '@lk' });
+    const co = dealer.cashOut('@lk', 'lk');
+    await dealer.flushPayouts();
+
+    // It minted rather than giving up, and the payout actually went out.
+    expect(minted).toBeGreaterThan(0);
+    expect(sent).toContain(co.amountUct);
+    expect(dealer.settlementFor(co.settlementId)).toBeDefined();
+    expect((await dealer.houseStats()).paidOutUct).toBeGreaterThanOrEqual(co.amountUct);
+  });
+
+  it('holds an owed prize back until its backoff elapses, but never on a boot sweep', async () => {
+    let live = false;
+    const attempts: number[] = [];
+    const flaky = {
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async (_address: string, amount: number) => {
+        attempts.push(amount);
+        if (!live) throw new Error('testnet down');
+        return { id: `tx-${attempts.length}`, deliveryState: 'landed' };
+      },
+    } as unknown as SphereAgent;
+    // A jackpot that cannot be sent becomes an owed prize in the durable ledger.
+    const dealer = new GameDealer({ agent: flaky, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1 });
+    const nr = dealer.newRound('coin', '@bo');
+    await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@bo', name: 'bo' });
+    await dealer.flushPayouts();
+    expect((await dealer.houseStats()).pendingPrizes.length).toBeGreaterThanOrEqual(1);
+
+    const owedBefore = attempts.length;
+    // A timed sweep right after a failure waits: the prize just tried.
+    dealer.retryPendingPrizes({ respectBackoff: true });
+    await dealer.flushPayouts();
+    expect(attempts.length).toBe(owedBefore);
+
+    // A boot sweep ignores the backoff - a restart is new information.
+    live = true;
+    dealer.retryPendingPrizes();
+    await dealer.flushPayouts();
+    expect(attempts.length).toBeGreaterThan(owedBefore);
+  });
 });
 
 describe('referral — dealer wiring', () => {
