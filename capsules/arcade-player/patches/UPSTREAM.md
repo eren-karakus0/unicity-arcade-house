@@ -239,6 +239,80 @@ that bumps `elliptic` (or an npm `overrides` pin, which we deliberately avoid so
 the SDK's own vetted version is used). No HIGH/CRITICAL advisories in either
 project. Reproduce: `pnpm audit --prod` in either repo root (2026-07-13).
 
+## Finding A2 (2026-08-09) — a wallet reports a large confirmed balance while every send is refused for insufficient balance
+
+**Upstream:** `@unicitylabs/sphere-sdk` (observed on 0.12.0 **and** 0.14.3 — the
+upgrade neither caused nor fixed it). **Severity: high** — the wallet holds a
+balance it cannot spend, so a live service cannot pay anyone.
+
+### Symptom
+
+The house wallet of a running arcade backend (hosted, long-lived, testnet2 via
+the wallet-api rail) reports a healthy confirmed balance, but **every** transfer
+fails:
+
+```
+payments.assets()  ->  UCT confirmedAmount ≈ 1,009,629 UCT
+payments.send({ coinId: <UCT>, amount: '15', recipient: <0x02… chain pubkey> })
+  -> SphereError: Insufficient balance for this transaction  (SEND_INSUFFICIENT_BALANCE)
+```
+
+It is not a transient race: 90+ consecutive sends over ~20 minutes, serialized
+(one in flight at a time), all refused. It has persisted for days across many
+restarts, and survived the 0.12.0 → 0.14.3 upgrade.
+
+### What we ruled out
+
+- **Not concurrency.** Sends are serialized behind a promise chain; the log shows
+  strict send → fail → send → fail alternation, never overlap.
+- **Not the recipients.** These are ordinary `02…`/`03…` chain pubkeys. A separate,
+  clearly different error (`no published chain pubkey`) is what unresolvable
+  recipients produce, and those are excluded here.
+- **Not an empty wallet.** `assets()` reports ~1M UCT confirmed, and minting adds
+  to it — the confirmed figure rises by exactly the minted amount each time.
+- **Not a failed mint.** `mint()` resolves with `success !== false` and the
+  confirmed balance rises, so fresh tokens really do land.
+- **Not the amounts.** Sends are 6–25 UCT against a ~1M balance.
+
+### Where it appears to come from
+
+`SpendQueue.plan()` (`modules/payments-v2/select/queue.ts`) rejects when
+`freeTotal + expectedChangeTotal < amount`, and `freeView()` counts a token only
+when it is *entirely* unreserved:
+
+```js
+if (this.deps.ledger.getFreeAmount(entry.tokenId, entry.amount) === entry.amount) { … }
+```
+
+So the refusal is consistent with every token in the pool being (at least
+partly) held by the ledger, while `assets()` — which reports confirmed holdings
+— still counts them. **Freshly minted tokens do not restore spendability
+either**, which is the part we cannot explain: a newly minted token should be
+unreserved by construction, yet sends immediately after a successful mint are
+refused identically.
+
+### What would help
+
+1. A public way to see *spendable* balance and what holds the rest — today
+   `assets()` is the only balance surface, and it cannot distinguish "rich" from
+   "able to pay". `pendingTransfers()` hints at shortfalls but does not attribute
+   reservations to tokens.
+2. If this is stuck/open intents holding the inventory, a supported way to
+   observe and release them. The docs state open intents resume when the vertical
+   starts; here restarts do not clear the condition.
+3. Failing that, a clearer error: `SEND_INSUFFICIENT_BALANCE` reads as "you are
+   broke", which sent us looking at the treasury for days when the balance was
+   never the problem.
+
+### Environment
+
+- `@unicitylabs/sphere-sdk` 0.14.3 (and previously 0.12.0), Node 20, tsx, Oracle Linux 9
+- testnet2 via `https://wallet-api.unicity.network`, long-lived process (weeks)
+- Wallet has a high transaction count: ~30,000 rounds played, ~13.3M UCT paid out,
+  ~12.3M UCT self-minted over its lifetime
+
+---
+
 Both monorepos otherwise pass a full quality + security pass on 2026-07-13:
 sphere-agent-bazaar 112/112 core tests, unicity-agent-bazaar 158/158 tests,
 lint + typecheck clean, no committed secrets (`.env` gitignored in both).
