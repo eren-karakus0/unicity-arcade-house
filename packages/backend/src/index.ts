@@ -568,5 +568,26 @@ const server = http.createServer((req, res) => {
   json(res, 404, { error: 'not found' });
 });
 
-server.listen(PORT, () => log.info(`backend listening on :${PORT}`));
-boot().catch((e) => log.error('boot failed', e instanceof Error ? e.message : e));
+// The port opens before boot finishes, so a boot that fails or never completes
+// looks perfectly healthy from the outside - the supervisor sees a live process,
+// the proxy an open port - while every route answers 503 for as long as the
+// process lives. (A rejected nametag did exactly this in production.) Exit for
+// real instead: logging alone, or setting process.exitCode, would never
+// terminate us while the listening server holds the event loop open, so the
+// restart policy would never fire and the outage would stay silent.
+const BOOT_DEADLINE_MS = 180_000;
+
+server.listen(PORT, () => {
+  log.info(`backend listening on :${PORT}`);
+  const watchdog = setTimeout(() => {
+    log.error(`boot did not complete within ${BOOT_DEADLINE_MS}ms — exiting so the supervisor restarts us`);
+    process.exit(1);
+  }, BOOT_DEADLINE_MS);
+  boot()
+    .then(() => clearTimeout(watchdog))
+    .catch((e) => {
+      clearTimeout(watchdog);
+      log.error('boot failed', e instanceof Error ? e.message : e);
+      process.exit(1);
+    });
+});

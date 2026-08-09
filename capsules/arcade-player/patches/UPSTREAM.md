@@ -274,6 +274,31 @@ restarts, and survived the 0.12.0 → 0.14.3 upgrade.
   confirmed balance rises, so fresh tokens really do land.
 - **Not the amounts.** Sends are 6–25 UCT against a ~1M balance.
 
+### Very likely cause: certifications stopped confirming on 2026-08-05
+
+Both symptoms start on the same day and have not stopped since:
+
+```
+Aug 05 22:08:34  Split mint failed: certification unconfirmed — the source spend
+                 may be on-chain; keep the intent open and resume under the same transferId
+Aug 05 22:10:07  Split burn failed: certification unconfirmed — …
+```
+
+66 such failures on the arcade wallet, 16 more on a second, independent wallet
+(a different service, its own identity) — so it is not one wallet's state.
+
+The SDK's documented response to `CERTIFICATION_UNCONFIRMED` is to **keep the
+intent open** and resume it later under the same `transferId` — correct for
+money-safety. But if certification keeps failing, those intents never close, and
+each one holds its source token. Over days the whole inventory ends up
+reserved, which is precisely what `freeView()` then reports as nothing free,
+while `assets()` still counts the tokens as confirmed holdings.
+
+**A fresh wallet does not escape it.** We provisioned a brand-new identity with
+an empty inventory: its very first `mint()` failed with
+`Mint certification failed: certification unconfirmed`, and its sends failed the
+same way. So the condition is upstream of any wallet's local state.
+
 ### Where it appears to come from
 
 `SpendQueue.plan()` (`modules/payments-v2/select/queue.ts`) rejects when
@@ -302,7 +327,10 @@ refused identically.
    starts; here restarts do not clear the condition.
 3. Failing that, a clearer error: `SEND_INSUFFICIENT_BALANCE` reads as "you are
    broke", which sent us looking at the treasury for days when the balance was
-   never the problem.
+   never the problem. "No spendable tokens — N held by open intents" would have
+   pointed straight at it.
+4. Most of all: whatever stopped confirming certifications on testnet2 around
+   2026-08-05. Everything above is downstream of that.
 
 ### Environment
 
