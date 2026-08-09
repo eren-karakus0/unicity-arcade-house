@@ -245,6 +245,8 @@ project. Reproduce: `pnpm audit --prod` in either repo root (2026-07-13).
 upgrade neither caused nor fixed it). **Severity: high** — the wallet holds a
 balance it cannot spend, so a live service cannot pay anyone.
 
+**Filed:** [unicity-sphere/sphere-sdk#737](https://github.com/unicity-sphere/sphere-sdk/issues/737) — 2026-08-10.
+
 ### Symptom
 
 The house wallet of a running arcade backend (hosted, long-lived, testnet2 via
