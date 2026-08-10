@@ -298,6 +298,18 @@ async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
   }
 }
 
+/**
+ * The spend could not be certified, so the SDK kept the intent open AND kept
+ * its source token reserved — deliberately, because the spend may already be
+ * on-chain. Re-sending such a prize would pick a second token and pay twice,
+ * and every attempt that ends this way pins one more token: retrying is how a
+ * wallet ratchets itself down to nothing spendable. These converge on their
+ * own once the network confirms; the only lever is resumeNow().
+ */
+function isKeptOpen(error: string | undefined): boolean {
+  return error !== undefined && /certification unconfirmed|CERTIFICATION_UNCONFIRMED/i.test(error);
+}
+
 function isInsufficientBalance(e: unknown): boolean {
   const err = e as { code?: unknown; message?: unknown } | null;
   return (
@@ -326,6 +338,11 @@ export interface PendingPrize {
   lastError?: string;
   /** When the last send was attempted — drives the retry backoff. */
   lastTryAt?: number;
+  /**
+   * A spend for this prize is open on-chain but unconfirmed. It must never be
+   * re-sent (that would pay twice); it converges on its own.
+   */
+  awaitingConvergence?: boolean;
   /** Settlement memo — defaults to the tournament payout; jackpots use 'arcade-jackpot'. */
   memo?: string;
   /** Game id for the feed event (tournament prizes have none). */
@@ -954,7 +971,20 @@ export class GameDealer {
         }
         // Keep it pending for the next retry; record why it failed (surfaced in houseStats).
         const cur = this.pendingPrizes.get(p.id);
-        if (cur) this.pendingPrizes.set(p.id, { ...cur, tries: cur.tries + 1, ...(error ? { lastError: error } : {}) });
+        if (cur) {
+          const keptOpen = isKeptOpen(error);
+          if (keptOpen && !cur.awaitingConvergence) {
+            this.log.warn(`prize ${p.id}: spend kept open, awaiting convergence — will NOT be re-sent`);
+          }
+          this.pendingPrizes.set(p.id, {
+            ...cur,
+            tries: cur.tries + 1,
+            ...(error ? { lastError: error } : {}),
+            // Once a spend is open it owns this prize: the retry sweep must
+            // leave it alone until the intent converges, or we double-pay.
+            ...(keptOpen ? { awaitingConvergence: true } : {}),
+          });
+        }
         this.payingPrizes.delete(p.id);
       },
       () => {
@@ -982,11 +1012,26 @@ export class GameDealer {
     const now = Date.now();
     const due = [...this.pendingPrizes.values()].filter((p) => {
       if (this.payingPrizes.has(p.id)) return false;
+      // An open spend already owns this prize — see isKeptOpen().
+      if (p.awaitingConvergence) return false;
       if (!respectBackoff || p.lastTryAt === undefined) return true;
       const backoff = Math.min(RETRY_BASE_MS * 2 ** Math.min(p.tries, 8), RETRY_MAX_MS);
       return now - p.lastTryAt >= backoff;
     });
     for (const p of due.slice(0, limit)) this.payPrize(p);
+  }
+
+  /**
+   * Nudge open spends toward convergence. Prizes whose send was kept open are
+   * waiting on exactly this — it is the only recovery path for them, and it
+   * releases the tokens they hold, which is what lets other payouts proceed.
+   */
+  async resumeOpenTransfers(): Promise<void> {
+    try {
+      await this.agent.resumeOpenTransfers();
+    } catch (e) {
+      this.log.warn('resume of open transfers failed', e instanceof Error ? e.message : e);
+    }
   }
 
   /** The player's in-house UCT balance. */

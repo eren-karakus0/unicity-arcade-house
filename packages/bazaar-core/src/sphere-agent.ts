@@ -189,6 +189,22 @@ export class SphereAgent {
     return page.entries;
   }
 
+  /**
+   * Drive open transfer intents toward convergence. When a certification cannot
+   * be confirmed the SDK keeps the intent open and HOLDS its source token, so
+   * the tokens come back only once these settle. This — never a fresh send — is
+   * the recovery path for such a transfer: re-sending would spend a second
+   * token for a payment that may already be on-chain.
+   */
+  async resumeOpenTransfers(): Promise<void> {
+    await this.sphere.payments.resumeNow();
+  }
+
+  /** Open intents (and shortfalls) currently holding this wallet's tokens. */
+  async pendingTransfers(): Promise<unknown[]> {
+    return this.sphere.payments.pendingTransfers();
+  }
+
   /** Confirmed (spendable) UCT balance, as a human-readable string. */
   async balanceUct(): Promise<string> {
     const uctHex = getCoinIdBySymbol(UCT);

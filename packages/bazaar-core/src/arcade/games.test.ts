@@ -700,6 +700,52 @@ describe('tournament — dealer wiring', () => {
     expect((await dealer.houseStats()).paidOutUct).toBeGreaterThan(0);
   });
 
+  it('never re-sends a prize whose spend was kept open (money-safety)', async () => {
+    // A spend that could not be certified stays open and may already be
+    // on-chain, so the SDK keeps holding its source token. Re-sending picks a
+    // second token and pays twice - and each attempt that ends open pins one
+    // more, which is how the wallet ratchets down to nothing spendable. Such a
+    // prize recovers by converging, never by another send.
+    let sends = 0;
+    const agent = {
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      resumeOpenTransfers: async () => undefined,
+      send: async () => {
+        sends += 1;
+        throw Object.assign(
+          new Error('Split burn failed: certification unconfirmed — keep the intent open'),
+          { code: 'CERTIFICATION_UNCONFIRMED', mayHaveCertified: true },
+        );
+      },
+    } as unknown as SphereAgent;
+    const dealer = new GameDealer({ agent, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1 });
+
+    const nr = dealer.newRound('coin', '@kept');
+    await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@kept', name: 'kept' });
+    await dealer.flushPayouts();
+    expect(sends).toBe(1);
+
+    // The prize stays owed and visibly awaiting convergence - but no sweep,
+    // boot or otherwise, ever issues a second send for it.
+    const owed = (await dealer.houseStats()).pendingPrizes;
+    expect(owed.length).toBe(1);
+    dealer.retryPendingPrizes();
+    dealer.retryPendingPrizes({ respectBackoff: true });
+    await dealer.flushPayouts();
+    expect(sends).toBe(1);
+
+    // And it survives a restart still protected.
+    const rebooted = new GameDealer({ agent, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1 });
+    rebooted.restore(dealer.snapshot());
+    rebooted.retryPendingPrizes();
+    await rebooted.flushPayouts();
+    expect(sends).toBe(1);
+  });
+
   it('does not let one payout that never settles block every later one', async () => {
     // Payouts run in sequence so they never contend for the same tokens, which
     // means a single call that never resolves takes the whole house down with

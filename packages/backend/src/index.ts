@@ -169,8 +169,19 @@ async function boot(): Promise<void> {
   // on a timer, not just here: anything unpayable at this instant would
   // otherwise sit owed until the next restart. The dealer applies its own
   // per-prize backoff and takes a slice at a time.
-  dealerRef.retryPendingPrizes();
-  setInterval(() => dealerRef.retryPendingPrizes({ respectBackoff: true }), 60_000);
+  // Recovery has two halves, and only one of them is a retry.
+  //
+  // A spend that could not be certified stays OPEN and keeps holding its source
+  // token. Re-sending it would spend a second token for a payment that may
+  // already be on-chain, and each attempt that ends open pins one more token -
+  // retrying is how a wallet ratchets itself down to nothing spendable. Those
+  // prizes are excluded from the sweep and recover only by converging, which is
+  // what resumeNow() drives. Prizes that never got submitted (no free tokens)
+  // are safe to retry, gently: a small slice, well spread out.
+  dealerRef.retryPendingPrizes({ limit: 3 });
+  setInterval(() => dealerRef.retryPendingPrizes({ limit: 3, respectBackoff: true }), 60_000);
+  void dealerRef.resumeOpenTransfers();
+  setInterval(() => void dealerRef.resumeOpenTransfers(), 120_000);
   // Only write when the snapshot actually changed - idle periods make no writes,
   // so the Neon Postgres instance can auto-suspend (keeps free-tier compute low).
   let lastSaved = '';
