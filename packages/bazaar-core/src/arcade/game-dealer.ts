@@ -272,6 +272,23 @@ const RETRY_MAX_MS = 30 * 60_000;
 /** Least time between float top-ups, so a backlog cannot mint once per prize. */
 const MINT_COOLDOWN_MS = 5 * 60_000;
 /**
+ * How far before a prize was recorded a SENT entry may be timestamped and still
+ * count as its payment — clock skew between the wallet's history and ours, not
+ * a licence to match an older payment.
+ */
+const SENT_MATCH_SLACK_MS = 60_000;
+
+/** The wallet history fields reconciliation reads (see HistoryEntry in the SDK). */
+interface HistoryLike {
+  id?: string;
+  type?: string;
+  amount?: string;
+  memo?: string;
+  timestamp?: number;
+  recipientPubkey?: string;
+  recipientNametag?: string;
+}
+/**
  * How long one payout may hold the payment lock. Payouts run in sequence so
  * they never contend for the same tokens, which also means a single call that
  * never settles takes every future payout down with it — the house simply stops
@@ -1048,6 +1065,76 @@ export class GameDealer {
     } catch (e) {
       this.log.warn('resume of open transfers failed', e instanceof Error ? e.message : e);
     }
+  }
+
+  /**
+   * Decide the fate of prizes whose spend was kept open, by asking the wallet
+   * what it actually sent.
+   *
+   * A kept-open spend may already be on-chain, so we never re-send one blindly
+   * — but once its intent converges the prize is either delivered or it is not,
+   * and the ledger cannot tell which. The wallet's own history can: a matching
+   * SENT entry is proof the winner was paid, so the prize retires. With no such
+   * entry and nothing left in flight, no spend can be outstanding, so the prize
+   * is safe to hand back to the retry sweep. While any intent is still open we
+   * leave everything alone — we cannot tell which prize it belongs to.
+   */
+  async reconcileOpenPrizes(): Promise<{ settled: number; released: number }> {
+    const waiting = [...this.pendingPrizes.values()].filter((p) => p.awaitingConvergence);
+    if (waiting.length === 0) return { settled: 0, released: 0 };
+
+    let entries: HistoryLike[];
+    try {
+      entries = (await this.agent.getHistory(500)) as HistoryLike[];
+    } catch (e) {
+      this.log.warn('prize reconciliation: history unavailable', e instanceof Error ? e.message : e);
+      return { settled: 0, released: 0 };
+    }
+
+    // One SENT entry can only settle one prize, or two identical prizes to the
+    // same winner would both retire on a single payment.
+    const claimed = new Set<string>();
+    let settled = 0;
+    let released = 0;
+
+    for (const p of waiting) {
+      const match = entries.find((e) => {
+        if (e.type !== 'SENT' || e.id === undefined || claimed.has(e.id)) return false;
+        if ((e.timestamp ?? 0) + SENT_MATCH_SLACK_MS < p.at) return false;
+        if (e.memo !== (p.memo ?? 'arcade-tournament')) return false;
+        if (e.amount !== this.agent.toSmallest(p.amount)) return false;
+        return this.addressMatches(p.address, e);
+      });
+      if (match?.id !== undefined) {
+        claimed.add(match.id);
+        this.pendingPrizes.delete(p.id);
+        this.paidOut += p.amount;
+        this.pushEvent({
+          kind: p.memo === 'arcade-jackpot' ? 'jackpot' : 'tournament',
+          at: Date.now(),
+          amountUct: p.amount,
+          name: p.name,
+          ...(p.game ? { game: p.game } : {}),
+        });
+        this.log.info(`prize ${p.id}: found on-chain as sent — retiring (${p.amount} UCT to @${p.name})`);
+        settled += 1;
+        continue;
+      }
+      if (this.openTransfers === 0) {
+        this.pendingPrizes.set(p.id, { ...p, awaitingConvergence: false });
+        this.log.info(`prize ${p.id}: never sent and nothing in flight — returning it to the retry queue`);
+        released += 1;
+      }
+    }
+    return { settled, released };
+  }
+
+  /** Does this history entry's recipient identify the prize's winner? */
+  private addressMatches(address: string, e: HistoryLike): boolean {
+    const want = address.replace(/^@/, '').toLowerCase();
+    const pubkey = e.recipientPubkey?.toLowerCase();
+    const tag = e.recipientNametag?.replace(/^@/, '').toLowerCase();
+    return want === pubkey || want === tag;
   }
 
   /** The player's in-house UCT balance. */

@@ -700,6 +700,131 @@ describe('tournament — dealer wiring', () => {
     expect((await dealer.houseStats()).paidOutUct).toBeGreaterThan(0);
   });
 
+  describe('reconciling prizes whose spend was kept open', () => {
+    // A kept-open spend may already be on-chain, so the prize is never
+    // re-sent blindly. Once its intent converges the prize is either paid or
+    // it is not, and the ledger cannot tell which - but the wallet's own
+    // history can.
+    const keptOpenAgent = (history: unknown[], openTransfers: number) => {
+      const sent: number[] = [];
+      const agent = {
+        nametag: 'house-test',
+        uctCoin: { coinId: 'aabb', decimals: 2 },
+        toHuman: (s: bigint | string) => (Number(BigInt(s)) / 100).toString(),
+        toSmallest: (h: string | number) => String(Math.round(Number(h) * 100)),
+        balanceUct: async () => 1000,
+        mintUct: async () => undefined,
+        resumeOpenTransfers: async () => undefined,
+        pendingTransfers: async () => Array.from({ length: openTransfers }, (_, i) => ({ id: i })),
+        getHistory: async () => history,
+        send: async (_a: string, amount: number) => {
+          sent.push(amount);
+          throw Object.assign(new Error('Split burn failed: certification unconfirmed'), {
+            code: 'CERTIFICATION_UNCONFIRMED',
+          });
+        },
+      } as unknown as SphereAgent;
+      return { agent, sent };
+    };
+
+    /** Drive one jackpot to a kept-open failure so a prize is owed and quarantined. */
+    const owedPrize = async (agent: SphereAgent) => {
+      const dealer = new GameDealer({ agent, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1 });
+      const nr = dealer.newRound('coin', '@0abc');
+      await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@0abc', name: '0abc' });
+      await dealer.flushPayouts();
+      const owed = (await dealer.houseStats()).pendingPrizes;
+      expect(owed).toHaveLength(1);
+      return { dealer, amount: owed[0]!.amountUct };
+    };
+
+    it('retires a prize the wallet actually sent', async () => {
+      const { agent } = keptOpenAgent([], 0);
+      const { dealer, amount } = await owedPrize(agent);
+      // The wallet reports the payment it made while the intent was open.
+      (agent as unknown as { getHistory: () => Promise<unknown[]> }).getHistory = async () => [
+        {
+          id: 'h1',
+          type: 'SENT',
+          amount: String(amount * 100),
+          memo: 'arcade-jackpot',
+          timestamp: Date.now(),
+          recipientNametag: '0abc',
+        },
+      ];
+      await dealer.resumeOpenTransfers();
+      const res = await dealer.reconcileOpenPrizes();
+
+      expect(res).toEqual({ settled: 1, released: 0 });
+      expect((await dealer.houseStats()).pendingPrizes).toHaveLength(0);
+      expect((await dealer.houseStats()).paidOutUct).toBe(amount);
+    });
+
+    it('re-queues a prize that was never sent, once nothing is in flight', async () => {
+      const { agent } = keptOpenAgent([], 0);
+      const { dealer } = await owedPrize(agent);
+      await dealer.resumeOpenTransfers();
+      const res = await dealer.reconcileOpenPrizes();
+
+      expect(res).toEqual({ settled: 0, released: 1 });
+      // Still owed, but no longer quarantined - the sweep may try it again.
+      expect((await dealer.houseStats()).pendingPrizes).toHaveLength(1);
+      expect((await dealer.houseStats()).paidOutUct).toBe(0);
+    });
+
+    it('leaves everything alone while an intent is still open', async () => {
+      const { agent } = keptOpenAgent([], 1); // one intent unaccounted for
+      const { dealer } = await owedPrize(agent);
+      await dealer.resumeOpenTransfers();
+      const res = await dealer.reconcileOpenPrizes();
+
+      expect(res).toEqual({ settled: 0, released: 0 });
+      expect((await dealer.houseStats()).pendingPrizes).toHaveLength(1);
+    });
+
+    it('will not settle two identical prizes from one payment', async () => {
+      const { agent } = keptOpenAgent([], 0);
+      const { dealer, amount } = await owedPrize(agent);
+      // A second, identical prize to the same winner.
+      const nr = dealer.newRound('coin', '@0abc');
+      await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@0abc', name: '0abc' });
+      await dealer.flushPayouts();
+      expect((await dealer.houseStats()).pendingPrizes.length).toBeGreaterThanOrEqual(2);
+
+      (agent as unknown as { getHistory: () => Promise<unknown[]> }).getHistory = async () => [
+        {
+          id: 'h1',
+          type: 'SENT',
+          amount: String(amount * 100),
+          memo: 'arcade-jackpot',
+          timestamp: Date.now(),
+          recipientNametag: '0abc',
+        },
+      ];
+      await dealer.resumeOpenTransfers();
+      const res = await dealer.reconcileOpenPrizes();
+      expect(res.settled).toBe(1); // one payment, one prize
+    });
+
+    it('ignores a payment that predates the prize', async () => {
+      const { agent } = keptOpenAgent([], 0);
+      const { dealer, amount } = await owedPrize(agent);
+      (agent as unknown as { getHistory: () => Promise<unknown[]> }).getHistory = async () => [
+        {
+          id: 'old',
+          type: 'SENT',
+          amount: String(amount * 100),
+          memo: 'arcade-jackpot',
+          timestamp: Date.now() - 60 * 60_000, // an hour before this prize existed
+          recipientNametag: '0abc',
+        },
+      ];
+      await dealer.resumeOpenTransfers();
+      const res = await dealer.reconcileOpenPrizes();
+      expect(res.settled).toBe(0);
+    });
+  });
+
   it('never re-sends a prize whose spend was kept open (money-safety)', async () => {
     // A spend that could not be certified stays open and may already be
     // on-chain, so the SDK keeps holding its source token. Re-sending picks a

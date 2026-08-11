@@ -180,8 +180,16 @@ async function boot(): Promise<void> {
   // are safe to retry, gently: a small slice, well spread out.
   dealerRef.retryPendingPrizes({ limit: 3 });
   setInterval(() => dealerRef.retryPendingPrizes({ limit: 3, respectBackoff: true }), 60_000);
-  void dealerRef.resumeOpenTransfers();
-  setInterval(() => void dealerRef.resumeOpenTransfers(), 120_000);
+  // Resume first, then reconcile: resume refreshes how many intents are still
+  // open, which is the fact reconciliation needs before it may hand a prize
+  // back to the retry queue.
+  const convergeTick = async (): Promise<void> => {
+    await dealerRef.resumeOpenTransfers();
+    const { settled, released } = await dealerRef.reconcileOpenPrizes();
+    if (settled || released) log.info(`prize reconciliation: ${settled} already paid, ${released} re-queued`);
+  };
+  void convergeTick();
+  setInterval(() => void convergeTick(), 120_000);
   // Only write when the snapshot actually changed - idle periods make no writes,
   // so the Neon Postgres instance can auto-suspend (keeps free-tier compute low).
   let lastSaved = '';
