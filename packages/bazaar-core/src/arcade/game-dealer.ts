@@ -253,6 +253,12 @@ export interface HouseStats {
   feed: HouseEvent[];
   /** Prizes (tournament crowns + jackpots) owed but awaiting on-chain confirmation (retried on boot). */
   pendingPrizes: { name: string; amountUct: number; tries: number; lastError?: string }[];
+  /**
+   * Transfer intents still open on-chain, as of the last resume tick. Each one
+   * holds the tokens it would spend, so a count that does not fall is why the
+   * house can hold a balance it cannot pay with.
+   */
+  openTransfers: number | null;
 }
 
 /**
@@ -420,6 +426,8 @@ export class GameDealer {
   private payLock: Promise<void> = Promise.resolve();
   /** When the house last minted a float top-up (see MINT_COOLDOWN_MS). */
   private lastMintAt = 0;
+  /** Open transfer intents seen at the last resume tick (null until first tick). */
+  private openTransfers: number | null = null;
 
   // House transparency (since last restart).
   private paidOut = 0;
@@ -1029,6 +1037,14 @@ export class GameDealer {
   async resumeOpenTransfers(): Promise<void> {
     try {
       await this.agent.resumeOpenTransfers();
+      // Report how many intents are still open afterwards. Prizes waiting on
+      // convergence are invisible otherwise — the wallet just quietly refuses
+      // to spend — and a count that never falls is the signal that resume is
+      // not making progress, which is worth noticing without reading logs for
+      // a refusal that happens to mention it.
+      const open = await this.agent.pendingTransfers();
+      this.openTransfers = open.length;
+      this.log.info(`resume tick — ${open.length} transfer(s) still open`);
     } catch (e) {
       this.log.warn('resume of open transfers failed', e instanceof Error ? e.message : e);
     }
@@ -1143,6 +1159,7 @@ export class GameDealer {
       paidOutUct: this.paidOut,
       roundsPlayed: this.roundsPlayed,
       selfMintedUct: this.minted,
+      openTransfers: this.openTransfers,
       jackpotUct: this.pot,
       feed: this.feed.slice(0, 12),
       pendingPrizes: [...this.pendingPrizes.values()].map((p) => ({
