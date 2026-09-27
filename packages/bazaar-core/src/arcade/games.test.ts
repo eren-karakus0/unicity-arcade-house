@@ -458,6 +458,60 @@ describe('UCT balance — welcome stake, bets, deposits, withdraw', () => {
     expect(dealer.settlementFor(co.settlementId).win?.status).toBe('failed');
     expect(dealer.newRound('coin', '@p4').you?.chips).toBe(5); // restored
   });
+
+  describe('a withdraw whose send may already be on-chain', () => {
+    // Refunding the chips while the payment can still land would pay twice:
+    // the player keeps the UCT and cashes the chips out again.
+    const keptOpenCashoutAgent = () =>
+      ({
+        nametag: 'house-test',
+        uctCoin: { coinId: 'aabb', decimals: 2 },
+        toHuman: (s: bigint | string) => (Number(BigInt(s)) / 100).toString(),
+        toSmallest: (h: string | number) => String(Math.round(Number(h) * 100)),
+        balanceUct: async () => 1000,
+        mintUct: async () => undefined,
+        resumeOpenTransfers: async () => undefined,
+        pendingTransfers: async () => [],
+        getHistory: async () => [] as unknown[],
+        send: async () => {
+          throw Object.assign(new Error('Split burn failed: certification unconfirmed'), {
+            code: 'CERTIFICATION_UNCONFIRMED',
+          });
+        },
+      }) as unknown as SphereAgent & { getHistory: () => Promise<unknown[]> };
+
+    const keptOpenCashout = async () => {
+      const agent = keptOpenCashoutAgent();
+      const dealer = new GameDealer({ agent, cooldownMs: 0 });
+      dealer.newRound('coin', '02cash'); // welcome 5
+      dealer.cashOut('02cash', 'cash');
+      await dealer.flushPayouts();
+      return { agent, dealer };
+    };
+
+    it('withholds the chips and owes the withdraw instead of refunding it', async () => {
+      const { dealer } = await keptOpenCashout();
+
+      expect(dealer.balanceOf('02cash').balanceUct).toBe(0);
+      const owed = (await dealer.houseStats()).pendingPrizes;
+      expect(owed).toHaveLength(1);
+      expect(owed[0]!.amountUct).toBe(5);
+    });
+
+    it('retires the owed withdraw once the wallet shows it was sent', async () => {
+      const { agent, dealer } = await keptOpenCashout();
+      agent.getHistory = async () => [
+        { id: 'h1', type: 'SENT', amount: '500', memo: 'arcade-cashout', timestamp: Date.now(), recipientPubkey: '02cash' },
+      ];
+
+      await dealer.resumeOpenTransfers();
+      const res = await dealer.reconcileOpenPrizes();
+
+      expect(res).toEqual({ settled: 1, released: 0 });
+      expect((await dealer.houseStats()).pendingPrizes).toHaveLength(0);
+      expect(dealer.balanceOf('02cash').balanceUct).toBe(0);
+    });
+  });
 });
 
 describe('rps game wrapper', () => {
@@ -871,6 +925,39 @@ describe('tournament — dealer wiring', () => {
     expect(sends).toBe(1);
   });
 
+  it.each([
+    'SEND_SYNC_PENDING',
+    'CHECKPOINT_PERSIST_FAILED',
+    'SPLIT_CHECKPOINT_LOST',
+    'CHECKPOINT_TRUSTBASE_MISMATCH',
+    'SEND_PARTIALLY_COMPLETED',
+  ])('never re-sends a prize whose send failed with %s (possibly committed)', async (code) => {
+    // The SDK names six outcomes that must never be re-sent; only one of them
+    // says "certification unconfirmed", so the code decides, not the wording.
+    let sends = 0;
+    const agent = {
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async () => {
+        sends += 1;
+        throw Object.assign(new Error('send outcome unknown'), { code });
+      },
+    } as unknown as SphereAgent;
+    const dealer = new GameDealer({ agent, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1 });
+
+    const nr = dealer.newRound('coin', '@kept');
+    await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@kept', name: 'kept' });
+    await dealer.flushPayouts();
+    dealer.retryPendingPrizes();
+    await dealer.flushPayouts();
+
+    expect(sends).toBe(1);
+    expect((await dealer.houseStats()).pendingPrizes).toHaveLength(1);
+  });
+
   it('does not let one payout that never settles block every later one', async () => {
     // Payouts run in sequence so they never contend for the same tokens, which
     // means a single call that never resolves takes the whole house down with
@@ -905,11 +992,36 @@ describe('tournament — dealer wiring', () => {
     // The hung payout releases the lock once its deadline passes.
     await new Promise((r) => setTimeout(r, 120));
     hang = false;
-    dealer.retryPendingPrizes();
+    const second = dealer.newRound('coin', '@b');
+    await dealer.play({ roundId: second.roundId, choice: 'heads', playerAddress: '@b', name: 'b' });
     await dealer.flushPayouts();
 
     expect(landed.length).toBeGreaterThan(0);
-    expect((await dealer.houseStats()).pendingPrizes).toHaveLength(0);
+  });
+
+  it('never re-sends a payout abandoned at its deadline (it may still land)', async () => {
+    let sends = 0;
+    const agent = {
+      nametag: 'house-test',
+      uctCoin: { coinId: 'aabb', decimals: 2 },
+      toHuman: (smallest: bigint | string) => (Number(BigInt(smallest)) / 100).toString(),
+      balanceUct: async () => 1000,
+      mintUct: async () => undefined,
+      send: async () => {
+        sends += 1;
+        await new Promise(() => {}); // still in flight when abandoned
+      },
+    } as unknown as SphereAgent;
+    const dealer = new GameDealer({ agent, cooldownMs: 0, jackpotSeedUct: 20, jackpotOdds: 1, payoutTimeoutMs: 40 });
+
+    const nr = dealer.newRound('coin', '@slow');
+    await dealer.play({ roundId: nr.roundId, choice: 'heads', playerAddress: '@slow', name: 'slow' });
+    await new Promise((r) => setTimeout(r, 120));
+    dealer.retryPendingPrizes();
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(sends).toBe(1);
+    expect((await dealer.houseStats()).pendingPrizes).toHaveLength(1);
   });
 
   it('settles a prize in-house when the winner has no on-chain identity', async () => {

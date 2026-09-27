@@ -306,6 +306,17 @@ function isUnreachableRecipient(error: string | undefined): boolean {
   return error !== undefined && /no published chain pubkey/i.test(error);
 }
 
+/**
+ * A payout was abandoned at its deadline. The send itself is still running and
+ * may yet land, so this is a possibly-committed outcome, not a clean failure.
+ */
+class PayoutDeadlineError extends Error {
+  constructor(ms: number) {
+    super(`payout did not settle within ${ms}ms`);
+    this.name = 'PayoutDeadlineError';
+  }
+}
+
 /** Reject if `p` has not settled within `ms`; the underlying work is left running. */
 async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -313,7 +324,7 @@ async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
     return await Promise.race([
       p,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`payout did not settle within ${ms}ms`)), ms);
+        timer = setTimeout(() => reject(new PayoutDeadlineError(ms)), ms);
       }),
     ]);
   } finally {
@@ -322,15 +333,49 @@ async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * The spend could not be certified, so the SDK kept the intent open AND kept
- * its source token reserved — deliberately, because the spend may already be
- * on-chain. Re-sending such a prize would pick a second token and pay twice,
- * and every attempt that ends this way pins one more token: retrying is how a
- * wallet ratchets itself down to nothing spendable. These converge on their
- * own once the network confirms; the only lever is resumeNow().
+ * The send outcomes the SDK says must never be re-sent (its
+ * `isPossiblyCommittedSendOutcome` set, SDK 0.17).
  */
-function isKeptOpen(error: string | undefined): boolean {
-  return error !== undefined && /certification unconfirmed|CERTIFICATION_UNCONFIRMED/i.test(error);
+const POSSIBLY_COMMITTED_SEND_CODES: ReadonlySet<string> = new Set([
+  'SEND_SYNC_PENDING',
+  'CERTIFICATION_UNCONFIRMED',
+  'CHECKPOINT_PERSIST_FAILED',
+  'SPLIT_CHECKPOINT_LOST',
+  'CHECKPOINT_TRUSTBASE_MISMATCH',
+  'SEND_PARTIALLY_COMPLETED',
+]);
+
+/**
+ * The spend may already be on-chain, so the SDK kept the intent open AND kept
+ * its source token reserved. Re-sending such a payment would pick a second
+ * token and pay twice, and every attempt that ends this way pins one more
+ * token: retrying is how a wallet ratchets itself down to nothing spendable.
+ * These converge on their own; the only lever is resumeNow().
+ *
+ * Read `code` structurally rather than through the SDK's own helper: that one
+ * tests `instanceof SphereError`, and errors thrown from the SDK's impl bundles
+ * are a different copy of the class. The wording fallback covers mint failures,
+ * which report this outcome in the message only.
+ */
+function isPossiblyCommitted(e: unknown): boolean {
+  if (e instanceof PayoutDeadlineError) return true;
+  const err = e as { code?: unknown; message?: unknown } | null;
+  if (typeof err?.code === 'string' && POSSIBLY_COMMITTED_SEND_CODES.has(err.code)) return true;
+  return typeof err?.message === 'string' && /certification unconfirmed/i.test(err.message);
+}
+
+/** Why an on-chain settlement did not land, as its failure handlers need it. */
+interface SettlementFailure {
+  message: string;
+  /** The payment may still land — it must be reconciled, never re-sent or refunded. */
+  possiblyCommitted: boolean;
+}
+
+function settlementEventKind(memo: string | undefined): HouseEvent['kind'] {
+  if (memo === 'arcade-jackpot') return 'jackpot';
+  if (memo === 'arcade-cashout') return 'cashout';
+  if (memo === 'arcade-tournament' || memo === undefined) return 'tournament';
+  return 'win';
 }
 
 function isInsufficientBalance(e: unknown): boolean {
@@ -366,7 +411,10 @@ export interface PendingPrize {
    * re-sent (that would pay twice); it converges on its own.
    */
   awaitingConvergence?: boolean;
-  /** Settlement memo — defaults to the tournament payout; jackpots use 'arcade-jackpot'. */
+  /**
+   * Settlement memo — defaults to the tournament payout; jackpots use
+   * 'arcade-jackpot', withdraws whose send may be on-chain 'arcade-cashout'.
+   */
   memo?: string;
   /** Game id for the feed event (tournament prizes have none). */
   game?: string;
@@ -982,8 +1030,8 @@ export class GameDealer {
       p.memo ?? 'arcade-tournament',
       p.name,
       p.game ?? 'tournament',
-      (error) => {
-        if (isUnreachableRecipient(error)) {
+      (failure) => {
+        if (isUnreachableRecipient(failure.message)) {
           // The winner has no on-chain identity, so this prize can never land -
           // retrying it forever only fills the ledger with sends that cannot
           // succeed and starves the ones that can. Settle it as house credit
@@ -997,14 +1045,14 @@ export class GameDealer {
         // Keep it pending for the next retry; record why it failed (surfaced in houseStats).
         const cur = this.pendingPrizes.get(p.id);
         if (cur) {
-          const keptOpen = isKeptOpen(error);
+          const keptOpen = failure.possiblyCommitted;
           if (keptOpen && !cur.awaitingConvergence) {
             this.log.warn(`prize ${p.id}: spend kept open, awaiting convergence — will NOT be re-sent`);
           }
           this.pendingPrizes.set(p.id, {
             ...cur,
             tries: cur.tries + 1,
-            ...(error ? { lastError: error } : {}),
+            lastError: failure.message,
             // Once a spend is open it owns this prize: the retry sweep must
             // leave it alone until the intent converges, or we double-pay.
             ...(keptOpen ? { awaitingConvergence: true } : {}),
@@ -1110,7 +1158,7 @@ export class GameDealer {
         this.pendingPrizes.delete(p.id);
         this.paidOut += p.amount;
         this.pushEvent({
-          kind: p.memo === 'arcade-jackpot' ? 'jackpot' : 'tournament',
+          kind: settlementEventKind(p.memo),
           at: Date.now(),
           amountUct: p.amount,
           name: p.name,
@@ -1198,13 +1246,36 @@ export class GameDealer {
     if (amount < 1) throw new Error('Withdraw needs at least 1 UCT.');
     this.players.set(key, { ...state, chips: 0 });
     const cleanName = (name || address).replace(/^@/, '').slice(0, 24);
-    const settlementId = `cashout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    this.enqueueSettlement(settlementId, address, amount, 'arcade-cashout', cleanName, 'cashout', () => {
-      // failed send → the chips come back
+    const requestedAt = Date.now();
+    const settlementId = `cashout-${requestedAt}-${Math.random().toString(36).slice(2, 8)}`;
+    this.enqueueSettlement(settlementId, address, amount, 'arcade-cashout', cleanName, 'cashout', (failure) => {
+      if (failure.possiblyCommitted) {
+        // Refunding now would pay twice if the send still lands, so the withdraw
+        // is owed through the prize ledger, where reconciliation either finds it
+        // sent or re-queues it once nothing is in flight.
+        this.oweUnresolvedCashout({ id: settlementId, address, amount, name: cleanName, at: requestedAt }, failure);
+        return;
+      }
       const cur = this.players.get(key) ?? newPlayerState();
       this.players.set(key, { ...cur, chips: cur.chips + amount });
     });
     return { settlementId, amountUct: amount };
+  }
+
+  private oweUnresolvedCashout(
+    cashout: Pick<PendingPrize, 'id' | 'address' | 'amount' | 'name' | 'at'>,
+    failure: SettlementFailure,
+  ): void {
+    this.pendingPrizes.set(cashout.id, {
+      ...cashout,
+      tries: 1,
+      lastError: failure.message,
+      lastTryAt: Date.now(),
+      awaitingConvergence: true,
+      memo: 'arcade-cashout',
+      game: 'cashout',
+    });
+    this.log.warn(`cashout ${cashout.id}: send may be on-chain — owed until reconciled, chips withheld`);
   }
 
   private keyFor(address?: string): string {
@@ -1406,7 +1477,7 @@ export class GameDealer {
     memo: string,
     name: string,
     game: string,
-    onFail?: (error?: string) => void,
+    onFail?: (failure: SettlementFailure) => void,
     onLand?: () => void,
   ): void {
     this.settlements.set(key, { status: 'pending', amountUct: amount, at: Date.now() });
@@ -1421,24 +1492,19 @@ export class GameDealer {
           ...(tx.deliveryState ? { delivery: tx.deliveryState } : {}),
         });
         this.paidOut += amount;
-        const kind: HouseEvent['kind'] =
-          memo === 'arcade-jackpot'
-            ? 'jackpot'
-            : memo === 'arcade-cashout'
-              ? 'cashout'
-              : memo === 'arcade-tournament'
-                ? 'tournament'
-                : 'win';
-        this.pushEvent({ kind, at: Date.now(), amountUct: amount, name, game });
+        this.pushEvent({ kind: settlementEventKind(memo), at: Date.now(), amountUct: amount, name, game });
         onLand?.();
       } catch (e) {
-        const error = e instanceof Error ? e.message : 'payout failed';
-        this.settlements.set(key, { status: 'failed', amountUct: amount, error, at: Date.now() });
-        this.log.warn(`settlement ${key} failed: ${error}`);
+        const failure: SettlementFailure = {
+          message: e instanceof Error ? e.message : 'payout failed',
+          possiblyCommitted: isPossiblyCommitted(e),
+        };
+        this.settlements.set(key, { status: 'failed', amountUct: amount, error: failure.message, at: Date.now() });
+        this.log.warn(`settlement ${key} failed: ${failure.message}`);
         // Jackpots (like tournament prizes) are owed via the durable pending
         // ledger — a failed send keeps the prize pending for retry (onFail),
         // and the pot stays reset to the seed. Nothing to restore here.
-        onFail?.(error);
+        onFail?.(failure);
       }
       this.pruneSettlements();
     })();
