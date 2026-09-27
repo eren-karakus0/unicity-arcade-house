@@ -3,7 +3,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export type NetworkType = 'mainnet' | 'testnet' | 'testnet2' | 'dev';
+// SDK 0.16 dropped the v1 `dev` network; these are the networks it still runs.
+const NETWORKS = ['mainnet', 'testnet', 'testnet2'] as const;
+export type NetworkType = (typeof NETWORKS)[number];
+
+/** @throws Error when SPHERE_NETWORK names a network the SDK does not run. */
+function parseNetwork(raw: string | undefined): NetworkType {
+  if (raw === undefined) return 'testnet2';
+  if ((NETWORKS as readonly string[]).includes(raw)) return raw as NetworkType;
+  throw new Error(`SPHERE_NETWORK=${raw} is not one of ${NETWORKS.join(', ')}`);
+}
 
 /** Public testnet2 gateway key (NOT a secret — documented in the SDK README). */
 export const PUBLIC_TESTNET2_KEY = 'sk_ddc3cfcc001e4a28ac3fad7407f99590';
@@ -49,7 +58,7 @@ export function loadEnv(): BazaarEnv {
   };
 
   return {
-    network: (clean(process.env.SPHERE_NETWORK) as NetworkType) ?? 'testnet2',
+    network: parseNetwork(clean(process.env.SPHERE_NETWORK)),
     oracleApiKey: clean(process.env.SPHERE_ORACLE_API_KEY) ?? PUBLIC_TESTNET2_KEY,
     walletApiUrl: clean(process.env.SPHERE_WALLET_API_URL) ?? DEFAULT_WALLET_API_URL,
     analyst: {

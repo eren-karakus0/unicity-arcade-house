@@ -2,6 +2,7 @@ import path from 'node:path';
 import { writeFileSync } from 'node:fs';
 import {
   Sphere,
+  TokenRegistry,
   getCoinIdBySymbol,
   getTokenDecimals,
   parseTokenAmount,
@@ -15,6 +16,7 @@ import type { NetworkType } from './config.js';
 const UCT = 'UCT';
 /** SDK default when a token's decimals can't be resolved (mirrors DEFAULT_TOKEN_DECIMALS). */
 const DEFAULT_UCT_DECIMALS = 18;
+const REGISTRY_READY_TIMEOUT_MS = 15_000;
 
 export interface SphereAgentOptions {
   /** Logical name, e.g. 'analyst' — used for logs, deviceId, data dir. */
@@ -97,6 +99,12 @@ export class SphereAgent {
     const { sphere, created, generatedMnemonic } = await Sphere.init(initOptions);
     this.inner = sphere;
 
+    // Init does not wait for the remote token registry; read UCT's id and
+    // decimals before it lands and they silently fall back to the symbol and
+    // the 18-decimal default.
+    if (!(await TokenRegistry.waitForReady(REGISTRY_READY_TIMEOUT_MS))) {
+      this.log.warn(`token registry not ready after ${REGISTRY_READY_TIMEOUT_MS}ms — UCT id/decimals use fallbacks`);
+    }
     this.uctCoinId = getCoinIdBySymbol(UCT) ?? UCT;
     try {
       this.uctDecimals = getTokenDecimals(this.uctCoinId);
