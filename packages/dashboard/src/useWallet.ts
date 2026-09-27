@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ConnectClient,
+  ERROR_CODES,
   SPHERE_NETWORKS,
   HOST_READY_TYPE,
   HOST_READY_TIMEOUT,
 } from '@unicitylabs/sphere-sdk/connect';
-import { PostMessageTransport, ExtensionTransport } from '@unicitylabs/sphere-sdk/connect/browser';
+import { PostMessageTransport } from '@unicitylabs/sphere-sdk/connect/browser';
 import type { ConnectTransport, PublicIdentity } from '@unicitylabs/sphere-sdk/connect';
 
 const WALLET_URL = 'https://sphere.unicity.network';
@@ -22,14 +23,22 @@ const DAPP = {
   icon: '/icon.svg',
 };
 
-/** True when the Sphere browser extension is installed. */
-function hasExtension(): boolean {
-  try {
-    const s = (window as unknown as { sphere?: { isInstalled?: () => boolean } }).sphere;
-    return !!s && typeof s.isInstalled === 'function' && s.isInstalled() === true;
-  } catch {
-    return false;
+/**
+ * Turn a failed handshake into something the player can act on. The wallet
+ * keeps mainnet and testnet apart with no in-session switch, so a wallet left
+ * on mainnet refuses this testnet dapp — and the raw refusal does not say how
+ * to fix it. The code is read structurally: bundles can carry their own copy of
+ * ConnectError, so `instanceof` is not reliable.
+ */
+function describeConnectFailure(e: unknown): string {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (code === ERROR_CODES.INCOMPATIBLE_NETWORK) {
+    return 'Your Sphere wallet is on another network. The arcade runs on testnet — switch the wallet to testnet and connect again.';
   }
+  if (code === ERROR_CODES.UNSUPPORTED_PROTOCOL_VERSION) {
+    return 'The wallet refused this app as out of date. Please reload the page; if it persists the arcade needs an update.';
+  }
+  return e instanceof Error ? e.message : 'Connection failed';
 }
 
 /**
@@ -107,34 +116,28 @@ export function useWallet(): WalletState {
 
   /**
    * Get a LIVE ConnectClient session — reuses the current one when its
-   * transport is still alive, otherwise opens the wallet (popup/extension) and
-   * handshakes (resuming the previous session skips the approval screen).
+   * transport is still alive, otherwise opens the wallet popup and handshakes
+   * (resuming the previous session skips the approval screen). Popup only: the
+   * browser extension is discontinued and no supported wallet answers it, so a
+   * leftover install would otherwise capture the connection and hang it.
    */
   const openClient = useCallback(async (): Promise<ConnectClient> => {
     const alive =
       clientRef.current?.isConnected && (!popupRef.current || popupRef.current.closed === false);
     if (alive) return clientRef.current!;
 
-    let transport: ConnectTransport;
-    let isPopup = false;
-
-    if (hasExtension()) {
-      transport = ExtensionTransport.forClient();
-    } else {
-      const popup = window.open(
-        `${WALLET_URL}/connect?origin=${encodeURIComponent(location.origin)}`,
-        'sphere-connect',
-        'width=440,height=680',
-      );
-      if (!popup) throw new Error('Popup blocked — please allow popups for this site.');
-      popupRef.current = popup;
-      transport = PostMessageTransport.forClient({ target: popup, targetOrigin: WALLET_URL });
-      isPopup = true;
-    }
+    const popup = window.open(
+      `${WALLET_URL}/connect?origin=${encodeURIComponent(location.origin)}`,
+      'sphere-connect',
+      'width=440,height=680',
+    );
+    if (!popup) throw new Error('Popup blocked — please allow popups for this site.');
+    popupRef.current = popup;
+    const transport: ConnectTransport = PostMessageTransport.forClient({ target: popup, targetOrigin: WALLET_URL });
     transportRef.current = transport;
 
     // The fix: let the popup announce it is listening before handshaking.
-    if (isPopup) await waitForHostReady();
+    await waitForHostReady();
 
     const resumeSessionId = sessionStorage.getItem(SESSION_KEY) ?? undefined;
     const client = new ConnectClient({
@@ -145,7 +148,14 @@ export function useWallet(): WalletState {
     });
     clientRef.current = client;
 
-    const result = await client.connect();
+    let result: Awaited<ReturnType<ConnectClient['connect']>>;
+    try {
+      result = await client.connect();
+    } catch (e) {
+      // Every entry point (connect, deposit, sign-in) handshakes here, so the
+      // refusal is translated once for all of them.
+      throw new Error(describeConnectFailure(e), { cause: e });
+    }
     sessionStorage.setItem(SESSION_KEY, result.sessionId);
     try {
       localStorage.setItem(IDENTITY_KEY, JSON.stringify(result.identity));
