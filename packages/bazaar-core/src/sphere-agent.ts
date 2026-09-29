@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { writeFileSync } from 'node:fs';
 import {
+  NETWORKS,
   Sphere,
   TokenRegistry,
   getCoinIdBySymbol,
@@ -11,12 +12,15 @@ import {
 import { createNodeProviders } from '@unicitylabs/sphere-sdk/impl/nodejs';
 import { createWalletApiProviders } from '@unicitylabs/sphere-sdk/impl/shared/wallet-api';
 import { Logger, createLogger } from './logger.js';
-import type { NetworkType } from './config.js';
+import { PUBLIC_TESTNET2_KEY, type NetworkType } from './config.js';
+import { provisionGatewayKey } from './gateway-key.js';
 
 const UCT = 'UCT';
 /** SDK default when a token's decimals can't be resolved (mirrors DEFAULT_TOKEN_DECIMALS). */
 const DEFAULT_UCT_DECIMALS = 18;
 const REGISTRY_READY_TIMEOUT_MS = 15_000;
+/** The wallet-api rails and Sphere.init below run on testnet2 end-to-end. */
+const SPHERE_NETWORK = 'testnet2' as const;
 
 export interface SphereAgentOptions {
   /** Logical name, e.g. 'analyst' — used for logs, deviceId, data dir. */
@@ -80,13 +84,13 @@ export class SphereAgent {
     });
     const providers = createWalletApiProviders(base, {
       baseUrl: this.opts.walletApiUrl,
-      network: 'testnet2',
+      network: SPHERE_NETWORK,
       deviceId: this.opts.deviceId ?? `bazaar-${this.name}`,
     });
 
     const common = {
       ...providers,
-      network: 'testnet2' as const,
+      network: SPHERE_NETWORK,
       nametag: this.desiredNametag,
       market: true as const,
       groupChat: true as const,
@@ -98,6 +102,7 @@ export class SphereAgent {
     this.log.info(`starting wallet @${this.desiredNametag} on ${network}…`);
     const { sphere, created, generatedMnemonic } = await Sphere.init(initOptions);
     this.inner = sphere;
+    if (this.opts.oracleApiKey === PUBLIC_TESTNET2_KEY) await this.useOwnGatewayKey(sphere);
 
     // Init does not wait for the remote token registry; read UCT's id and
     // decimals before it lands and they silently fall back to the symbol and
@@ -128,6 +133,25 @@ export class SphereAgent {
       }
     }
     return { created, mnemonic: generatedMnemonic };
+  }
+
+  /**
+   * Swap the shared public key for this wallet's own, so the agent stops
+   * competing with every other wallet for one key's rate limit. A failure keeps
+   * the shared key: the agent still works, only throttled as before.
+   */
+  private async useOwnGatewayKey(sphere: Sphere): Promise<void> {
+    try {
+      const key = await provisionGatewayKey({
+        gatewayUrl: NETWORKS[SPHERE_NETWORK].aggregatorUrl,
+        network: SPHERE_NETWORK,
+        privateKeyHex: sphere.deriveAddress(0).privateKey,
+      });
+      await sphere.setOracleApiKey(key.apiKey);
+      this.log.info(`gateway key: own ${key.plan}-plan key (${key.created ? 'created' : 'reused'})`);
+    } catch (e) {
+      this.log.warn(`gateway key: staying on the shared public key — ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   get nametag(): string {
